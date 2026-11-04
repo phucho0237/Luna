@@ -9,6 +9,9 @@ namespace Luna.Protocol.Messaging;
 public sealed record ParseResult(IReadOnlyList<ChatMessage> Messages, int Skipped)
 {
     public static readonly ParseResult Empty = new([], 0);
+
+    /// <summary>Prints counts only, never the messages.</summary>
+    public override string ToString() => $"ParseResult {{ Count = {Messages.Count}, Skipped = {Skipped} }}";
 }
 
 /// <summary>

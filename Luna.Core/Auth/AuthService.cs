@@ -6,7 +6,11 @@ using Luna.Protocol.Http;
 namespace Luna.Core.Auth;
 
 /// <summary>A logged-in session: the context (cookies, IMEI) and the getLoginInfo information.</summary>
-public sealed record AuthSession(ClientContext Context, LoginInfo Info);
+public sealed record AuthSession(ClientContext Context, LoginInfo Info)
+{
+    /// <summary>Never prints the context or the login info.</summary>
+    public override string ToString() => nameof(AuthSession);
+}
 
 /// <summary>Combines "restore the saved session" and "log in with QR", then saves the session.</summary>
 public sealed class AuthService

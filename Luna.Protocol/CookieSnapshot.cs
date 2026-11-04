@@ -8,4 +8,8 @@ public sealed record CookieSnapshot(
     string Path,
     DateTime? ExpiresUtc,
     bool Secure,
-    bool HttpOnly);
+    bool HttpOnly)
+{
+    /// <summary>Never prints the cookie name or value: they are the key to the account.</summary>
+    public override string ToString() => nameof(CookieSnapshot);
+}

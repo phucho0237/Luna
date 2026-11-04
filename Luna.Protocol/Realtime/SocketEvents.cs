@@ -3,7 +3,11 @@
 namespace Luna.Protocol.Realtime;
 
 /// <summary>One decoded event from the server. <see cref="Payload"/> is the original JSON, usually read further at the "data" property.</summary>
-public sealed record SocketEvent(ushort Cmd, byte SubCmd, JsonElement Payload);
+public sealed record SocketEvent(ushort Cmd, byte SubCmd, JsonElement Payload)
+{
+    /// <summary>Prints the two numbers only; the payload can hold message content, uids and phone numbers.</summary>
+    public override string ToString() => $"SocketEvent {{ Cmd = {Cmd}, SubCmd = {SubCmd} }}";
+}
 
 public enum SocketState
 {
@@ -18,4 +22,8 @@ public enum SocketState
     DuplicateConnection,
 }
 
-public sealed record SocketStateChange(SocketState State, string? Detail = null);
+public sealed record SocketStateChange(SocketState State, string? Detail = null)
+{
+    /// <summary>Prints the state only; the detail can be a free-text disconnect reason.</summary>
+    public override string ToString() => $"SocketStateChange {{ State = {State} }}";
+}
