@@ -139,10 +139,12 @@ Folder `Luna.Protocol/Api/`.
 - Needs live shape runs with the secondary account first (run by Luca with `Luna.Playground`); the agent must not claim to have tried the live server.
 - Feed the result into `IMessageStore.SaveAsync`; respect the per-endpoint intervals and the 429 cooldown from T3d and T3e.
 
-### T6. Split out the WebSocket I/O so it can be tested
+### [x] T6. Split out the WebSocket I/O so it can be tested
 
 - Put `ClientWebSocket` behind an interface (`IWebSocketConnection`) to test the reconnect loop: backoff, address switching, stopping when opened twice (`3000`), clean cancellation, ping sent only after authentication.
 - Criteria: tests use a fake connection, with no long real `Task.Delay` (inject time).
+- Done: `SocketClient` takes an optional connection factory and delay; `ClientWebSocketConnection` is a pass-through adapter. `SocketClientReconnectTests` drive the loop with a scripted fake connection and a fake delay (backoff 2..30 s and its reset, endpoint rotation, ping, duplicate stop, cancellation, close, bad frames), checked with mutation runs.
+- Not covered: the adapter `ClientWebSocketConnection` is the only untested pass-through, and a real-server run (Playground normal mode) is still the integration check.
 
 ### T7. WinUI 3 interface
 
