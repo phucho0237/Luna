@@ -55,6 +55,29 @@ public sealed class SqliteMessageStore : IMessageStore
           AND (($global IS NOT NULL AND msg_id = $global) OR ($cli IS NOT NULL AND cli_msg_id = $cli))
         """;
 
+    /// <summary>Largest page or list size a caller may ask for.</summary>
+    private const int MaxLimit = 500;
+
+    // Keyset pagination: strictly older than the cursor in (ts, id) order. Uses ix_messages_thread_ts.
+    private const string PageSql = """
+        SELECT id, thread_type, thread_id, msg_id, cli_msg_id, ts, is_self, uid_from, id_to, display_name, msg_type, text, recalled, raw_json
+        FROM messages
+        WHERE thread_type = $tt AND thread_id = $tid
+          AND ($all = 1 OR recalled = 0)
+          AND ($cts IS NULL OR ts < $cts OR (ts = $cts AND id < $cid))
+        ORDER BY ts DESC, id DESC
+        LIMIT $limit
+        """;
+
+    private const string ConversationsSql = """
+        SELECT thread_type, thread_id, MAX(ts), COUNT(*)
+        FROM messages
+        WHERE recalled = 0
+        GROUP BY thread_type, thread_id
+        ORDER BY MAX(ts) DESC, thread_type, thread_id
+        LIMIT $limit
+        """;
+
     private readonly SqliteConnection _connection;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private volatile bool _disposed;
@@ -277,17 +300,106 @@ public sealed class SqliteMessageStore : IMessageStore
     private static object Db(string? value) => value is null ? DBNull.Value : value;
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<StoredMessage>> GetPageAsync(
+    public async Task<IReadOnlyList<StoredMessage>> GetPageAsync(
         ThreadType threadType,
         string threadId,
         MessageCursor? before,
         int limit,
         bool includeRecalled = false,
-        CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(threadId);
+        CheckLimit(limit);
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using SqliteCommand command = _connection.CreateCommand();
+            command.CommandText = PageSql;
+            command.Parameters.Add("$tt", SqliteType.Integer).Value = (int)threadType;
+            command.Parameters.Add("$tid", SqliteType.Text).Value = threadId;
+            command.Parameters.Add("$all", SqliteType.Integer).Value = includeRecalled ? 1 : 0;
+            command.Parameters.Add("$cts", SqliteType.Integer).Value = before is null ? DBNull.Value : before.TimestampMs;
+            command.Parameters.Add("$cid", SqliteType.Integer).Value = before is null ? DBNull.Value : before.Id;
+            command.Parameters.Add("$limit", SqliteType.Integer).Value = limit;
+
+            var page = new List<StoredMessage>();
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                page.Add(new StoredMessage(
+                    reader.GetInt64(0),
+                    (ThreadType)reader.GetInt32(1),
+                    reader.GetString(2),
+                    reader.GetString(3),
+                    reader.GetString(4),
+                    reader.GetInt64(5),
+                    reader.GetInt32(6) != 0,
+                    reader.GetString(7),
+                    reader.GetString(8),
+                    reader.GetString(9),
+                    reader.GetString(10),
+                    reader.IsDBNull(11) ? null : reader.GetString(11),
+                    reader.GetInt32(12) != 0,
+                    reader.GetString(13)));
+            }
+
+            return page;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<ConversationSummary>> ListConversationsAsync(int limit, CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException();
+    public async Task<IReadOnlyList<ConversationSummary>> ListConversationsAsync(int limit, CancellationToken cancellationToken = default)
+    {
+        CheckLimit(limit);
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using SqliteCommand command = _connection.CreateCommand();
+            command.CommandText = ConversationsSql;
+            command.Parameters.Add("$limit", SqliteType.Integer).Value = limit;
+
+            var conversations = new List<ConversationSummary>();
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                conversations.Add(new ConversationSummary(
+                    (ThreadType)reader.GetInt32(0),
+                    reader.GetString(1),
+                    reader.GetInt64(2),
+                    reader.GetInt32(3)));
+            }
+
+            return conversations;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private static void CheckLimit(int limit)
+    {
+        if (limit is < 1 or > MaxLimit)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit), "The limit must be between 1 and 500.");
+        }
+    }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 
