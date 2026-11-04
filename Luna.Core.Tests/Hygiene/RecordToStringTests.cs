@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using Luna.Core.Sessions;
+using Luna.Core.Throttling;
 using Luna.Protocol;
 using Xunit.Abstractions;
 
@@ -90,7 +91,9 @@ public class RecordToStringTests
 
     private static IEnumerable<Type> ScannedTypes() =>
         new[] { typeof(ClientContext).Assembly, typeof(SessionData).Assembly }
-            .SelectMany(assembly => assembly.GetExportedTypes());
+            .SelectMany(assembly => assembly.GetTypes())
+            .Where(type => !type.IsDefined(typeof(CompilerGeneratedAttribute), inherit: false)
+                && !type.Name.Contains('<', StringComparison.Ordinal));
 
     // ---- Self-checks: prove the guard detects what it claims -------------------------------------------------
 
@@ -195,6 +198,25 @@ public class RecordToStringTests
             offenders.Count == 0,
             "These records keep the compiler-generated ToString; declare an override that hides the data: "
             + string.Join("; ", offenders));
+    }
+
+    [Fact]
+    public void Private_throttle_State_ToString_hides_endpoint_names_and_times()
+    {
+        const string fakeEndpoint = "fake-endpoint-marker";
+        const string fakeTime = "2099-01-01T00:00:00.0000000Z";
+        Type stateType = typeof(ApiThrottleGuard).GetNestedType("State", BindingFlags.NonPublic)!;
+        object state = Activator.CreateInstance(
+            stateType,
+            fakeTime,
+            new Dictionary<string, string> { [fakeEndpoint] = fakeTime })!;
+        Assert.Contains(fakeEndpoint, ((IReadOnlyDictionary<string, string>)stateType.GetProperty("Calls")!.GetValue(state)!).Keys);
+
+        string text = state.ToString()!;
+
+        Assert.Equal("State", text);
+        Assert.DoesNotContain(fakeEndpoint, text, StringComparison.Ordinal);
+        Assert.DoesNotContain(fakeTime, text, StringComparison.Ordinal);
     }
 
     [Fact]

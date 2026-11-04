@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Luna.Protocol.Events;
+using Luna.Protocol.Messaging;
 using Luna.Protocol.Realtime;
 using Xunit;
 
@@ -42,6 +44,26 @@ public class RecordRedactionTests
         Assert.Equal("SocketEvent { Cmd = 501, SubCmd = 0 }", text);
         Assert.DoesNotContain(FakeUid, text, StringComparison.Ordinal);
         Assert.DoesNotContain(FakePhone, text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ParseResult_ToString_does_not_throw_when_the_list_is_null()
+    {
+        var result = new ParseResult(null!, 3);
+
+        string text = result.ToString();
+
+        Assert.Contains("Skipped = 3", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RouteResult_ToString_does_not_throw_when_the_list_is_null()
+    {
+        var result = new RouteResult(null!, 2);
+
+        string text = result.ToString();
+
+        Assert.Contains("Skipped = 2", text, StringComparison.Ordinal);
     }
 
     [Fact]

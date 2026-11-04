@@ -80,7 +80,11 @@ public sealed class ApiThrottleGuard
         }
     }
 
-    private sealed record State(string? Blocked, IReadOnlyDictionary<string, string> Calls);
+    private sealed record State(string? Blocked, IReadOnlyDictionary<string, string> Calls)
+    {
+        /// <summary>Does not print endpoint names or timestamps.</summary>
+        public override string ToString() => nameof(State);
+    }
 
     private static string Iso(DateTimeOffset value) => value.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
 

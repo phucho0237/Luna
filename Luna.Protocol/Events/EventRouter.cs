@@ -10,7 +10,7 @@ public sealed record RouteResult(IReadOnlyList<ChatEvent> Events, int Skipped)
     public static readonly RouteResult Empty = new([], 0);
 
     /// <summary>Prints counts only, never the events.</summary>
-    public override string ToString() => $"RouteResult {{ Count = {Events.Count}, Skipped = {Skipped} }}";
+    public override string ToString() => $"RouteResult {{ Count = {Events?.Count ?? 0}, Skipped = {Skipped} }}";
 }
 
 /// <summary>

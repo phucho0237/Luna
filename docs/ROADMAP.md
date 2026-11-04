@@ -125,11 +125,19 @@ Folder `Luna.Protocol/Api/`.
 
 - Group send (`/api/group/sendmsg`), quote (`/api/message/quote`), recall (`/api/message/undo`, `/api/group/undomsg`). Do this after T4 is confirmed on the live server.
 
-### T5. History and local storage
+### [x] T5a. Local message storage in SQLite (2026-11-04)
 
-- SQLite in `Luna.Core` (**ask Luca before adding the package** `Microsoft.Data.Sqlite`). Tables for conversations and messages, de-duplication by `msgId`, pagination by time.
+- Storage only: no network and no history sync. Package `Microsoft.Data.Sqlite` 10.0.13 in `Luna.Core`.
+- API in `Luna.Core.Storage`: `IMessageStore` (`SaveAsync`, `GetPageAsync`, `ListConversationsAsync`), `SqliteMessageStore(string databasePath)` (`":memory:"` allowed for tests), `MessageStoreDefaults.DefaultPath` (`%LOCALAPPDATA%\Luna\history.db`), and the records `StoreResult`, `MessageCursor`, `StoredMessage`, `ConversationSummary` (the last two have a redacted `ToString`).
+- `SaveAsync` is one transaction per batch (all or nothing). De-duplication is per thread by `msgId`, falling back to `c:` + `cliMsgId` when `msgId` is empty or `0`; the first copy wins. Recall notices are never stored: they mark the target message in the same thread as recalled and clear its text. A notice that arrives before the original message is lost (counted as skipped), and the matching rule is `[Source]`-level, not verified on the live server. Recalled rows keep only metadata (their text is cleared and their raw JSON is replaced by `{}`), and an original that arrives after its recall notice is inserted as a normal message (T5b must decide how to remember recalls).
+- Paging is keyset-based on `(ts, id)` descending, limit 1 to 500; recalled messages are hidden unless requested. Conversations are grouped by `(thread type, thread id)` and counted without recalled messages.
+- Decision (Luca): the database is **plain at rest** for now (no SQLCipher, no field encryption). It lives outside the repository, is ignored by `.gitignore` and is denied to agents. Message text, uids and thread ids never appear in exception messages, logs or `ToString`.
+
+### [ ] T5b. Pull history from the server
+
 - Pull history over WebSocket (frames 510/511) or HTTP (`/api/group/history`); choose one and record the reason in `PROTOCOL.md`.
-- Criteria: tests with in-memory SQLite. `.db` files are already in `.gitignore`.
+- Needs live shape runs with the secondary account first (run by Luca with `Luna.Playground`); the agent must not claim to have tried the live server.
+- Feed the result into `IMessageStore.SaveAsync`; respect the per-endpoint intervals and the 429 cooldown from T3d and T3e.
 
 ### T6. Split out the WebSocket I/O so it can be tested
 
