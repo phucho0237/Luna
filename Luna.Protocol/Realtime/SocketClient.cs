@@ -23,13 +23,19 @@ public sealed class SocketClient
     private readonly IReadOnlyList<string> _endpoints;
     private readonly Action<string>? _trace;
     private readonly Func<long> _unixMillis;
+    private readonly Func<IWebSocketConnection> _connectionFactory;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
 
     /// <param name="endpoints">The <c>zpw_ws</c> list from getLoginInfo.</param>
+    /// <param name="connectionFactory">Creates one connection per attempt. Defaults to a real <c>ClientWebSocket</c>.</param>
+    /// <param name="delay">Waits for a duration (reconnect backoff and ping interval). Defaults to <c>Task.Delay</c>.</param>
     public SocketClient(
         ClientContext context,
         IReadOnlyList<string> endpoints,
         Action<string>? trace = null,
-        Func<long>? unixMillis = null)
+        Func<long>? unixMillis = null,
+        Func<IWebSocketConnection>? connectionFactory = null,
+        Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(endpoints);
@@ -42,6 +48,8 @@ public sealed class SocketClient
         _endpoints = endpoints;
         _trace = trace;
         _unixMillis = unixMillis ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        _connectionFactory = connectionFactory ?? (() => new ClientWebSocketConnection());
+        _delay = delay ?? Task.Delay;
     }
 
     /// <summary>
@@ -118,7 +126,7 @@ public sealed class SocketClient
                 }
 
                 endpointIndex++;
-                await Task.Delay(backoff, cancellationToken).ConfigureAwait(false);
+                await _delay(backoff, cancellationToken).ConfigureAwait(false);
                 backoff = TimeSpan.FromSeconds(Math.Min(MaxBackoff.TotalSeconds, backoff.TotalSeconds * 2));
             }
         }
@@ -135,18 +143,23 @@ public sealed class SocketClient
         Action<SocketStateChange>? onState,
         CancellationToken ct)
     {
-        using var socket = new ClientWebSocket();
-        socket.Options.SetRequestHeader("Origin", "https://chat.zalo.me");
-        socket.Options.SetRequestHeader("User-Agent", _context.UserAgent);
+        using IWebSocketConnection socket = _connectionFactory();
+
+        // The headers hold the session cookie: they must never be traced.
+        var headers = new Dictionary<string, string>
+        {
+            ["Origin"] = "https://chat.zalo.me",
+            ["User-Agent"] = _context.UserAgent,
+        };
 
         // Like zca-js: cookies are taken for https://chat.zalo.me.
         string cookie = _context.Cookies.GetCookieHeader(new Uri("https://chat.zalo.me"));
         if (cookie.Length > 0)
         {
-            socket.Options.SetRequestHeader("Cookie", cookie);
+            headers["Cookie"] = cookie;
         }
 
-        await socket.ConnectAsync(new Uri(url), ct).ConfigureAwait(false);
+        await socket.ConnectAsync(new Uri(url), headers, ct).ConfigureAwait(false);
 
         using var pingCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         Task pingTask = PingLoopAsync(socket, protocol, pingCts.Token);
@@ -169,7 +182,7 @@ public sealed class SocketClient
     }
 
     private async Task<string> ReceiveLoopAsync(
-        ClientWebSocket socket,
+        IWebSocketConnection socket,
         SocketProtocol protocol,
         Action<SocketEvent> onEvent,
         Action<SocketStateChange>? onState,
@@ -235,11 +248,13 @@ public sealed class SocketClient
         return $"The connection is closed ({socket.State}).";
     }
 
-    private async Task PingLoopAsync(ClientWebSocket socket, SocketProtocol protocol, CancellationToken ct)
+    private async Task PingLoopAsync(IWebSocketConnection socket, SocketProtocol protocol, CancellationToken ct)
     {
-        using var timer = new PeriodicTimer(PingInterval);
-        while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
+        // A plain delay loop instead of PeriodicTimer so the delay can be injected; the interval drifts by the time
+        // spent sending a ping, which is negligible for a keep-alive.
+        while (true)
         {
+            await _delay(PingInterval, ct).ConfigureAwait(false);
             if (!protocol.IsAuthenticated || socket.State != WebSocketState.Open)
             {
                 continue;
@@ -251,7 +266,7 @@ public sealed class SocketClient
         }
     }
 
-    private static async Task TryCloseAsync(ClientWebSocket socket, WebSocketCloseStatus status, string description)
+    private static async Task TryCloseAsync(IWebSocketConnection socket, WebSocketCloseStatus status, string description)
     {
         try
         {
