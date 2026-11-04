@@ -81,7 +81,8 @@ public sealed partial class MainWindow : Window
 
     // Sizes and centers the window for the current page. It runs when the window is created and when the page
     // changes, never on other refreshes, so a window the user moved or resized is left alone in between. A maximized
-    // or minimized window is not touched. The DPI and the display are read again on every call because the window
+    // or minimized window is not touched on the home page. The login page is fixed (no maximize button, not
+    // resizable), so it restores the window first. The DPI and the display are read again on every call because the window
     // may have been dragged to another monitor since the last page change.
     private void PlaceForPage(bool login)
     {
@@ -102,12 +103,39 @@ public sealed partial class MainWindow : Window
 
             OverlappedPresenter? presenter = appWindow.Presenter as OverlappedPresenter;
             ApplyMinimumSize(presenter, dpi, target);
-            if (presenter is not null && presenter.State != OverlappedPresenterState.Restored)
+            var bounds = new RectInt32(target.X, target.Y, target.Width, target.Height);
+
+            if (!login)
             {
+                // Home: enable the flags BEFORE the resize so nothing can block it.
+                if (presenter is not null)
+                {
+                    presenter.IsMaximizable = true;
+                    presenter.IsResizable = true;
+                    if (presenter.State != OverlappedPresenterState.Restored)
+                    {
+                        return;
+                    }
+                }
+
+                appWindow.MoveAndResize(bounds);
                 return;
             }
 
-            appWindow.MoveAndResize(new RectInt32(target.X, target.Y, target.Width, target.Height));
+            // Login: a fixed compact window. Restore first so the resize is not skipped and the maximize button is
+            // never turned off on a maximized window, then resize, then disable the flags AFTER the resize so the
+            // programmatic resize is never blocked by IsResizable = false.
+            if (presenter is not null && presenter.State != OverlappedPresenterState.Restored)
+            {
+                presenter.Restore();
+            }
+
+            appWindow.MoveAndResize(bounds);
+            if (presenter is not null)
+            {
+                presenter.IsMaximizable = false;
+                presenter.IsResizable = false;
+            }
         }
         catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException)
         {
