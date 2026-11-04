@@ -373,13 +373,19 @@ public sealed class LoginViewModelTests
         var fake = new FakeAuthService { BlockQr = true };
         using var vm = Create(fake);
 
+        // Dedicated threads: the callers block on the barrier waiting for each other, so they must not
+        // depend on the thread-pool size (a 2-core CI runner grows the pool too slowly to fill it).
         using var barrier = new Barrier(16);
         Task[] starts = Enumerable.Range(0, 16)
-            .Select(_ => Task.Run(() =>
-            {
-                barrier.SignalAndWait();
-                return Run(vm);
-            }))
+            .Select(_ => Task.Factory.StartNew(
+                () =>
+                {
+                    barrier.SignalAndWait();
+                    return Run(vm);
+                },
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default).Unwrap())
             .ToArray();
 
         await fake.QrEntered.WaitAsync(Patience);
