@@ -12,6 +12,13 @@ public class ResultRecordRedactionTests
     private const string FakeUid = "9990001112223334445";
     private const string FakePhone = "0999000111";
     private const string FakeReason = "fake-disconnect-reason-token";
+    private const string FakeText = "fake-message-text-token";
+
+    // One valid text message plus one non-object item (counted as skipped).
+    private static string FakeMessagePayload() =>
+        "{\"data\":{\"msgs\":[{\"actionId\":\"1\",\"msgId\":\"2002\",\"cliMsgId\":\"3003\",\"msgType\":\"chat.text\","
+        + "\"uidFrom\":\"" + FakeUid + "\",\"idTo\":\"0\",\"ts\":\"1700000000000\",\"content\":\"" + FakeText + "\"},"
+        + "\"not-an-object\"]}}";
 
     [Fact]
     public void SocketFrame_ToString_hides_the_body()
@@ -42,26 +49,36 @@ public class ResultRecordRedactionTests
     [Fact]
     public void RouteResult_ToString_prints_counts_only()
     {
-        using JsonDocument document = JsonDocument.Parse($$$"""{"uid":"{{{FakeUid}}}"}""");
-        var events = new List<ChatEvent>
-        {
-            new UnknownEvent(999, 0, document.RootElement),
-            new UnknownEvent(998, 1, document.RootElement),
-        };
-        var result = new RouteResult(events, 3);
-        Assert.Equal(2, result.Events.Count);
+        SocketEvent socketEvent = Events.EventRouterTests.Create(501, FakeMessagePayload());
+
+        RouteResult result = new EventRouter().Route(socketEvent);
+
+        MessageReceived received = Assert.IsType<MessageReceived>(Assert.Single(result.Events));
+        Assert.Equal(FakeText, received.Message.Text);
+        Assert.Equal(1, result.Skipped);
 
         string text = result.ToString();
 
-        Assert.Equal("RouteResult { Count = 2, Skipped = 3 }", text);
+        Assert.Equal("RouteResult { Count = 1, Skipped = 1 }", text);
+        Assert.DoesNotContain(FakeText, text, StringComparison.Ordinal);
         Assert.DoesNotContain(FakeUid, text, StringComparison.Ordinal);
     }
 
     [Fact]
     public void ParseResult_ToString_prints_counts_only()
     {
-        var result = new ParseResult([], 3);
+        SocketEvent socketEvent = Events.EventRouterTests.Create(501, FakeMessagePayload());
 
-        Assert.Equal("ParseResult { Count = 0, Skipped = 3 }", result.ToString());
+        ParseResult result = MessageParser.ParseEvent(socketEvent);
+
+        ChatMessage message = Assert.Single(result.Messages);
+        Assert.Equal(FakeText, message.Text);
+        Assert.Equal(1, result.Skipped);
+
+        string text = result.ToString();
+
+        Assert.Equal("ParseResult { Count = 1, Skipped = 1 }", text);
+        Assert.DoesNotContain(FakeText, text, StringComparison.Ordinal);
+        Assert.DoesNotContain(FakeUid, text, StringComparison.Ordinal);
     }
 }
