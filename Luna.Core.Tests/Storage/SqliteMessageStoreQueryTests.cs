@@ -58,6 +58,57 @@ public class SqliteMessageStoreQueryTests
         Assert.Equal(25, seen.Distinct(StringComparer.Ordinal).Count());
     }
 
+    // Name of the private SQL constant that holds the page query with a cursor.
+    private const string CursorSqlConstant = "PageAfterSql";
+
+    [Fact]
+    public async Task The_cursor_page_query_seeks_on_the_thread_index_with_a_range_on_ts_and_needs_no_sort()
+    {
+        using var folder = new TempFolder();
+        string path = Path.Combine(folder.Path, "history.db");
+        using (var store = new SqliteMessageStore(path))
+        {
+            await store.SaveAsync(Enumerable.Range(0, 20).Select(i => Msg(i, BaseTs + i)).ToArray());
+        }
+
+        string sql = (string)typeof(SqliteMessageStore)
+            .GetField(CursorSqlConstant, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+            .GetRawConstantValue()!;
+
+        var details = new List<string>();
+        var builder = new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadOnly, Pooling = false };
+        using (var raw = new SqliteConnection(builder.ToString()))
+        {
+            raw.Open();
+            using SqliteCommand command = raw.CreateCommand();
+            command.CommandText = "EXPLAIN QUERY PLAN " + sql;
+            command.Parameters.Add("$tt", SqliteType.Integer).Value = (int)ThreadType.User;
+            command.Parameters.Add("$tid", SqliteType.Text).Value = FakeThread;
+            command.Parameters.Add("$all", SqliteType.Integer).Value = 0;
+            command.Parameters.Add("$cts", SqliteType.Integer).Value = BaseTs + 10;
+            command.Parameters.Add("$cid", SqliteType.Integer).Value = 10;
+            command.Parameters.Add("$limit", SqliteType.Integer).Value = 10;
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                details.Add(reader.GetString(reader.GetOrdinal("detail")));
+            }
+        }
+
+        string plan = string.Join(" || ", details);
+        bool seeks = details.Any(d =>
+            d.Contains("SEARCH", StringComparison.Ordinal)
+            && d.Contains("ix_messages_thread_ts", StringComparison.Ordinal)
+            && d.Contains("thread_type=?", StringComparison.Ordinal)
+            && d.Contains("thread_id=?", StringComparison.Ordinal)
+            && (d.Contains("ts<", StringComparison.Ordinal) || d.Contains("(ts,id)<", StringComparison.Ordinal)));
+
+        Assert.True(seeks, "Expected a SEARCH on ix_messages_thread_ts with a range on ts. Plan: " + plan);
+        Assert.False(
+            details.Any(d => d.Contains("TEMP B-TREE", StringComparison.OrdinalIgnoreCase)),
+            "Expected no temp b-tree sort step. Plan: " + plan);
+    }
+
     [Fact]
     public async Task A_page_maps_every_field_and_keeps_64_bit_ids_intact()
     {

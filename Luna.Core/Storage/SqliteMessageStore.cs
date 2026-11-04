@@ -58,13 +58,23 @@ public sealed class SqliteMessageStore : IMessageStore
     /// <summary>Largest page or list size a caller may ask for.</summary>
     private const int MaxLimit = 500;
 
-    // Keyset pagination: strictly older than the cursor in (ts, id) order. Uses ix_messages_thread_ts.
+    // Keyset pagination: strictly older than the cursor in (ts, id) order. Two variants so that a NULL cursor is never
+    // compared; the row-value comparison lets SQLite seek into ix_messages_thread_ts instead of scanning the thread.
     private const string PageSql = """
         SELECT id, thread_type, thread_id, msg_id, cli_msg_id, ts, is_self, uid_from, id_to, display_name, msg_type, text, recalled, raw_json
         FROM messages
         WHERE thread_type = $tt AND thread_id = $tid
           AND ($all = 1 OR recalled = 0)
-          AND ($cts IS NULL OR ts < $cts OR (ts = $cts AND id < $cid))
+        ORDER BY ts DESC, id DESC
+        LIMIT $limit
+        """;
+
+    private const string PageAfterSql = """
+        SELECT id, thread_type, thread_id, msg_id, cli_msg_id, ts, is_self, uid_from, id_to, display_name, msg_type, text, recalled, raw_json
+        FROM messages
+        WHERE thread_type = $tt AND thread_id = $tid
+          AND ($all = 1 OR recalled = 0)
+          AND (ts, id) < ($cts, $cid)
         ORDER BY ts DESC, id DESC
         LIMIT $limit
         """;
@@ -340,12 +350,16 @@ public sealed class SqliteMessageStore : IMessageStore
             cancellationToken.ThrowIfCancellationRequested();
 
             using SqliteCommand command = _connection.CreateCommand();
-            command.CommandText = PageSql;
+            command.CommandText = before is null ? PageSql : PageAfterSql;
             command.Parameters.Add("$tt", SqliteType.Integer).Value = (int)threadType;
             command.Parameters.Add("$tid", SqliteType.Text).Value = threadId;
             command.Parameters.Add("$all", SqliteType.Integer).Value = includeRecalled ? 1 : 0;
-            command.Parameters.Add("$cts", SqliteType.Integer).Value = before is null ? DBNull.Value : before.TimestampMs;
-            command.Parameters.Add("$cid", SqliteType.Integer).Value = before is null ? DBNull.Value : before.Id;
+            if (before is not null)
+            {
+                command.Parameters.Add("$cts", SqliteType.Integer).Value = before.TimestampMs;
+                command.Parameters.Add("$cid", SqliteType.Integer).Value = before.Id;
+            }
+
             command.Parameters.Add("$limit", SqliteType.Integer).Value = limit;
 
             var page = new List<StoredMessage>();
