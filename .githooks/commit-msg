@@ -1,0 +1,10 @@
+#!/bin/sh
+# Rejects commit messages that contain non-ASCII characters (project language policy).
+# Prints only the line numbers, never the offending text.
+
+lines=$(LC_ALL=C grep -n '[^[:print:][:space:]]' "$1" | cut -d: -f1 | tr '\n' ' ')
+if [ -n "$lines" ]; then
+    echo "commit-msg: the commit message must be ASCII only (English). Non-ASCII on line(s): $lines" >&2
+    exit 1
+fi
+exit 0

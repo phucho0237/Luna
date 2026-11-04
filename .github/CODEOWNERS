@@ -1,0 +1,11 @@
+# Default owner
+*                      @phucho0237
+
+# Sensitive areas: always need maintainer review
+/Luna.Protocol/Crypto/ @phucho0237
+/Luna.Core/Sessions/   @phucho0237
+/.github/              @phucho0237
+/AGENTS.md             @phucho0237
+/CLAUDE.md             @phucho0237
+/.claude/              @phucho0237
+/SECURITY.md           @phucho0237

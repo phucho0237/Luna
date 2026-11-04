@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pwsh -NoProfile -File scripts/check.ps1*)",
+      "Bash(pwsh -NoProfile -File scripts/ref-grep.ps1 *)",
+      "Bash(pwsh -NoProfile -File scripts/doc-section.ps1 *)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(git merge *)",
+      "Bash(dotnet add *)"
+    ],
+    "deny": [
+      "Read(~/AppData/Local/Luna/**)",
+      "Read(**/session*.json)",
+      "Read(**/bin/**)",
+      "Read(**/obj/**)",
+      "Bash(curl *)"
+    ]
+  },
+  "attribution": {
+    "commit": "Co-Authored-By: Claude <noreply@anthropic.com>",
+    "pr": "",
+    "sessionUrl": false
+  }
+}

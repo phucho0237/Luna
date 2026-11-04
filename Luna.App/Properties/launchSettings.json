@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Luna.App (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "Luna.App (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
