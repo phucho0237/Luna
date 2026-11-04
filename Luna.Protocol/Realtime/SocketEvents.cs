@@ -3,7 +3,11 @@
 namespace Luna.Protocol.Realtime;
 
 /// <summary>One decoded event from the server. <see cref="Payload"/> is the original JSON, usually read further at the "data" property.</summary>
-public sealed record SocketEvent(ushort Cmd, byte SubCmd, JsonElement Payload);
+public sealed record SocketEvent(ushort Cmd, byte SubCmd, JsonElement Payload)
+{
+    /// <summary>Prints the two numbers only; the payload can hold message content, uids and phone numbers.</summary>
+    public override string ToString() => $"SocketEvent {{ Cmd = {Cmd}, SubCmd = {SubCmd} }}";
+}
 
 public enum SocketState
 {

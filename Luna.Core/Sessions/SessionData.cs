@@ -15,6 +15,9 @@ public sealed record SessionData(
 {
     public const int CurrentVersion = 1;
 
+    /// <summary>Never prints the IMEI, user agent or cookies.</summary>
+    public override string ToString() => nameof(SessionData);
+
     public static SessionData FromContext(ClientContext context, DateTime nowUtc)
     {
         ArgumentNullException.ThrowIfNull(context);
