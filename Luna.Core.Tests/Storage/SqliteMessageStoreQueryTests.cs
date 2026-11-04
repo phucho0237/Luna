@@ -58,6 +58,24 @@ public class SqliteMessageStoreQueryTests
         Assert.Equal(25, seen.Distinct(StringComparer.Ordinal).Count());
     }
 
+    [Fact]
+    public async Task A_large_save_does_not_run_on_the_calling_thread()
+    {
+        using SqliteMessageStore store = NewMemoryStore();
+        const int count = 5000;
+        ChatMessage[] batch = Enumerable.Range(0, count).Select(i => Msg(i, BaseTs + i)).ToArray();
+
+        // Without a hand-off to the thread pool the whole batch is written before SaveAsync returns (the gate is free,
+        // so nothing in it is asynchronous) and the returned task is already completed. This is a timing check: a
+        // 5000-message batch is far longer than the time the caller needs to look at the task.
+        Task<StoreResult> task = store.SaveAsync(batch);
+        bool completedOnReturn = task.IsCompleted;
+        StoreResult result = await task;
+
+        Assert.False(completedOnReturn, "SaveAsync finished its work on the calling thread.");
+        Assert.Equal(count, result.Inserted);
+    }
+
     // Name of the private SQL constant that holds the page query with a cursor.
     private const string CursorSqlConstant = "PageAfterSql";
 

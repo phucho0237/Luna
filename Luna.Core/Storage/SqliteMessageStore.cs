@@ -181,9 +181,15 @@ public sealed class SqliteMessageStore : IMessageStore
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            ThrowIfDisposed();
-            cancellationToken.ThrowIfCancellationRequested();
-            return SaveBatch(messages, cancellationToken);
+            // Off the caller thread: a large batch must never block a UI thread. The gate stays held until it is done.
+            return await Task.Run(
+                () =>
+                {
+                    ThrowIfDisposed();
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return SaveBatch(messages, cancellationToken);
+                },
+                cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -346,49 +352,58 @@ public sealed class SqliteMessageStore : IMessageStore
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            ThrowIfDisposed();
-            cancellationToken.ThrowIfCancellationRequested();
-
-            using SqliteCommand command = _connection.CreateCommand();
-            command.CommandText = before is null ? PageSql : PageAfterSql;
-            command.Parameters.Add("$tt", SqliteType.Integer).Value = (int)threadType;
-            command.Parameters.Add("$tid", SqliteType.Text).Value = threadId;
-            command.Parameters.Add("$all", SqliteType.Integer).Value = includeRecalled ? 1 : 0;
-            if (before is not null)
-            {
-                command.Parameters.Add("$cts", SqliteType.Integer).Value = before.TimestampMs;
-                command.Parameters.Add("$cid", SqliteType.Integer).Value = before.Id;
-            }
-
-            command.Parameters.Add("$limit", SqliteType.Integer).Value = limit;
-
-            var page = new List<StoredMessage>();
-            using SqliteDataReader reader = command.ExecuteReader();
-            while (reader.Read())
-            {
-                page.Add(new StoredMessage(
-                    reader.GetInt64(0),
-                    (ThreadType)reader.GetInt32(1),
-                    reader.GetString(2),
-                    reader.GetString(3),
-                    reader.GetString(4),
-                    reader.GetInt64(5),
-                    reader.GetInt32(6) != 0,
-                    reader.GetString(7),
-                    reader.GetString(8),
-                    reader.GetString(9),
-                    reader.GetString(10),
-                    reader.IsDBNull(11) ? null : reader.GetString(11),
-                    reader.GetInt32(12) != 0,
-                    reader.GetString(13)));
-            }
-
-            return page;
+            return await Task.Run(
+                () =>
+                {
+                    ThrowIfDisposed();
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return ReadPage(threadType, threadId, before, limit, includeRecalled);
+                },
+                cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _gate.Release();
         }
+    }
+
+    private List<StoredMessage> ReadPage(ThreadType threadType, string threadId, MessageCursor? before, int limit, bool includeRecalled)
+    {
+        using SqliteCommand command = _connection.CreateCommand();
+        command.CommandText = before is null ? PageSql : PageAfterSql;
+        command.Parameters.Add("$tt", SqliteType.Integer).Value = (int)threadType;
+        command.Parameters.Add("$tid", SqliteType.Text).Value = threadId;
+        command.Parameters.Add("$all", SqliteType.Integer).Value = includeRecalled ? 1 : 0;
+        if (before is not null)
+        {
+            command.Parameters.Add("$cts", SqliteType.Integer).Value = before.TimestampMs;
+            command.Parameters.Add("$cid", SqliteType.Integer).Value = before.Id;
+        }
+
+        command.Parameters.Add("$limit", SqliteType.Integer).Value = limit;
+
+        var page = new List<StoredMessage>();
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            page.Add(new StoredMessage(
+                reader.GetInt64(0),
+                (ThreadType)reader.GetInt32(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetInt64(5),
+                reader.GetInt32(6) != 0,
+                reader.GetString(7),
+                reader.GetString(8),
+                reader.GetString(9),
+                reader.GetString(10),
+                reader.IsDBNull(11) ? null : reader.GetString(11),
+                reader.GetInt32(12) != 0,
+                reader.GetString(13)));
+        }
+
+        return page;
     }
 
     /// <inheritdoc />
@@ -401,30 +416,39 @@ public sealed class SqliteMessageStore : IMessageStore
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            ThrowIfDisposed();
-            cancellationToken.ThrowIfCancellationRequested();
-
-            using SqliteCommand command = _connection.CreateCommand();
-            command.CommandText = ConversationsSql;
-            command.Parameters.Add("$limit", SqliteType.Integer).Value = limit;
-
-            var conversations = new List<ConversationSummary>();
-            using SqliteDataReader reader = command.ExecuteReader();
-            while (reader.Read())
-            {
-                conversations.Add(new ConversationSummary(
-                    (ThreadType)reader.GetInt32(0),
-                    reader.GetString(1),
-                    reader.GetInt64(2),
-                    reader.GetInt32(3)));
-            }
-
-            return conversations;
+            return await Task.Run(
+                () =>
+                {
+                    ThrowIfDisposed();
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return ReadConversations(limit);
+                },
+                cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _gate.Release();
         }
+    }
+
+    private List<ConversationSummary> ReadConversations(int limit)
+    {
+        using SqliteCommand command = _connection.CreateCommand();
+        command.CommandText = ConversationsSql;
+        command.Parameters.Add("$limit", SqliteType.Integer).Value = limit;
+
+        var conversations = new List<ConversationSummary>();
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            conversations.Add(new ConversationSummary(
+                (ThreadType)reader.GetInt32(0),
+                reader.GetString(1),
+                reader.GetInt64(2),
+                reader.GetInt32(3)));
+        }
+
+        return conversations;
     }
 
     private static void CheckLimit(int limit)
