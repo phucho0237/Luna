@@ -79,7 +79,6 @@ public sealed partial class LoginView : UserControl
         Progress.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
 
         bool showQr = state is LoginState.WaitingForScan or LoginState.WaitingForConfirm;
-        Instruction.Visibility = state == LoginState.WaitingForScan ? Visibility.Visible : Visibility.Collapsed;
 
         bool canStart = state is LoginState.Idle or LoginState.Failed or LoginState.Declined or LoginState.Cancelled;
         bool canCancel = state is LoginState.Restoring or LoginState.WaitingForScan

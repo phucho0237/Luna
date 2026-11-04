@@ -71,8 +71,20 @@
   </data>
 
   <!-- Login view: static texts bound with x:Uid -->
-  <data name="LoginInstruction.Text" xml:space="preserve">
-    <value>Mở ứng dụng nhắn tin trên điện thoại, chọn quét mã QR rồi quét mã bên dưới để đăng nhập.</value>
+  <data name="LoginBrand.Text" xml:space="preserve">
+    <value>Luna</value>
+  </data>
+  <data name="LoginHeading.Text" xml:space="preserve">
+    <value>Quét mã QR để đăng nhập</value>
+  </data>
+  <data name="LoginStep1.Text" xml:space="preserve">
+    <value>Mở ứng dụng nhắn tin trên điện thoại của bạn.</value>
+  </data>
+  <data name="LoginStep2.Text" xml:space="preserve">
+    <value>Nhấn vào biểu tượng quét mã QR trên thanh tìm kiếm.</value>
+  </data>
+  <data name="LoginStep3.Text" xml:space="preserve">
+    <value>Hướng camera vào mã ở trên để đăng nhập.</value>
   </data>
   <data name="LoginQrImage.AutomationProperties.Name" xml:space="preserve">
     <value>Mã QR đăng nhập</value>
