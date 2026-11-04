@@ -26,7 +26,7 @@
     <value>Đang khôi phục phiên đăng nhập...</value>
   </data>
   <data name="Login_State_WaitingForScan" xml:space="preserve">
-    <value>Hãy quét mã QR bằng ứng dụng nhắn tin trên điện thoại của bạn.</value>
+    <value>Đang chờ bạn quét mã QR.</value>
   </data>
   <data name="Login_State_WaitingForConfirm" xml:space="preserve">
     <value>Đã quét mã. Hãy xác nhận đăng nhập trên điện thoại.</value>
@@ -79,9 +79,6 @@
   </data>
   <data name="LoginProgress.AutomationProperties.Name" xml:space="preserve">
     <value>Đang xử lý</value>
-  </data>
-  <data name="LoginStatus.AutomationProperties.Name" xml:space="preserve">
-    <value>Trạng thái đăng nhập</value>
   </data>
   <data name="LoginStartButton.Content" xml:space="preserve">
     <value>Đăng nhập bằng mã QR</value>
