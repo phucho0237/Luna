@@ -50,7 +50,7 @@ public sealed class SqliteMessageStore : IMessageStore
         """;
 
     private const string RecallSql = """
-        UPDATE messages SET recalled = 1, text = NULL
+        UPDATE messages SET recalled = 1, text = NULL, raw_json = '{}'
         WHERE thread_type = $tt AND thread_id = $tid
           AND (($global IS NOT NULL AND msg_id = $global) OR ($cli IS NOT NULL AND cli_msg_id = $cli))
         """;

@@ -194,6 +194,29 @@ public class SqliteMessageStoreQueryTests
     }
 
     [Fact]
+    public async Task A_recalled_message_loses_its_text_and_its_raw_json()
+    {
+        using SqliteMessageStore store = NewMemoryStore();
+        await store.SaveAsync([FakeMessages.Text(ThreadType.User, FakeThread, "5001", "6001", "1700000000001")]);
+        StoredMessage before = Assert.Single(await store.GetPageAsync(ThreadType.User, FakeThread, null, 10));
+        Assert.Equal(FakeMessages.FakeText, before.Text);
+        Assert.Contains(FakeMessages.FakeText, before.RawJson, StringComparison.Ordinal);
+
+        StoreResult recall = await store.SaveAsync([FakeMessages.Undo(ThreadType.User, FakeThread, "5001", "6001")]);
+
+        StoredMessage after = Assert.Single(await store.GetPageAsync(ThreadType.User, FakeThread, null, 10, includeRecalled: true));
+        Assert.Equal(1, recall.Recalled);
+        Assert.True(after.Recalled);
+        Assert.Null(after.Text);
+        Assert.Equal("{}", after.RawJson);
+        Assert.Equal("5001", after.MsgId);
+        foreach (string? field in new[] { after.Text, after.RawJson, after.MsgId, after.CliMsgId, after.ThreadId, after.UidFrom, after.IdTo, after.DisplayName, after.MsgType })
+        {
+            Assert.DoesNotContain(FakeMessages.FakeText, field ?? string.Empty, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public async Task A_stored_recall_notice_leaves_no_row_of_its_own()
     {
         using SqliteMessageStore store = NewMemoryStore();
