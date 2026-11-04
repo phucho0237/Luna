@@ -168,24 +168,44 @@ public class RecordToStringTests
 
     // ---- The scan over the shipped assemblies ----------------------------------------------------------------
 
-    /// <summary>Report mode: lists the violators (type and property names only, never values) without failing.</summary>
+    /// <summary>
+    /// Every public record or record struct that exposes unsafe data must declare its own ToString.
+    /// Lists type and property names only, never values.
+    /// </summary>
     [Fact]
-    public void Report_records_that_keep_the_generated_ToString()
+    public void Public_records_with_unsafe_properties_declare_their_own_ToString()
     {
         List<Type> scanned = ScannedTypes().ToList();
         Assert.Contains(typeof(SessionData), scanned);
 
-        List<Violation> violations = scanned
+        List<string> offenders = scanned
             .Select(Analyze)
             .OfType<Violation>()
+            .Where(v => !AllowList.ContainsKey(v.TypeName))
             .OrderBy(v => v.TypeName, StringComparer.Ordinal)
+            .Select(v => $"{v.TypeName} ({string.Join(", ", v.UnsafeMembers)})")
             .ToList();
 
-        _output.WriteLine($"VIOLATORS: {violations.Count}");
-        foreach (Violation violation in violations)
+        foreach (string offender in offenders)
         {
-            string allowed = AllowList.ContainsKey(violation.TypeName) ? " [allow-listed]" : string.Empty;
-            _output.WriteLine($"VIOLATOR {violation.TypeName}: {string.Join(", ", violation.UnsafeMembers)}{allowed}");
+            _output.WriteLine($"VIOLATOR {offender}");
         }
+
+        Assert.True(
+            offenders.Count == 0,
+            "These records keep the compiler-generated ToString; declare an override that hides the data: "
+            + string.Join("; ", offenders));
+    }
+
+    [Fact]
+    public void AllowList_has_no_stale_entries()
+    {
+        HashSet<string> violating = ScannedTypes()
+            .Select(Analyze)
+            .OfType<Violation>()
+            .Select(v => v.TypeName)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.All(AllowList.Keys, name => Assert.Contains(name, violating));
     }
 }
