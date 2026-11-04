@@ -13,7 +13,7 @@ public sealed record AuthSession(ClientContext Context, LoginInfo Info)
 }
 
 /// <summary>Combines "restore the saved session" and "log in with QR", then saves the session.</summary>
-public sealed class AuthService
+public sealed class AuthService : IAuthService
 {
     public const string DefaultUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0";
