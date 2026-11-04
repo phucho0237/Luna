@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Luna.Core.Auth;
 using Luna.Core.Tests.Support;
 using Luna.Core.ViewModels;
 using Luna.Protocol.Auth;
@@ -480,6 +481,96 @@ public sealed class LoginViewModelTests
 
         Assert.True(fake.LastQrToken.IsCancellationRequested);
         Assert.Equal(LoginState.Cancelled, vm.State);
+    }
+
+    /// <summary>
+    /// A restore that blocks until <see cref="Release"/> and deliberately ignores its token, like a slow disk or
+    /// DPAPI call that cannot be interrupted; it then reports "no saved session". Counts QR login attempts.
+    /// </summary>
+    private sealed class BlockingRestoreAuth : IAuthService
+    {
+        private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _qrCalls;
+
+        public Task Entered => _entered.Task;
+
+        public CancellationToken RestoreToken { get; private set; }
+
+        public int QrCalls => Volatile.Read(ref _qrCalls);
+
+        public void Release() => _gate.TrySetResult();
+
+        public async Task<AuthSession?> RestoreAsync(CancellationToken cancellationToken = default)
+        {
+            RestoreToken = cancellationToken;
+            _entered.TrySetResult();
+            await _gate.Task.ConfigureAwait(false);
+            return null;
+        }
+
+        public Task<AuthSession> LoginWithQrAsync(Action<QrLoginEvent> onEvent, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _qrCalls);
+            return Task.FromResult(FakeSessions.Create());
+        }
+    }
+
+    [Fact]
+    public async Task Cancel_during_restore_ends_cancelled_without_a_qr_login_and_start_works_again()
+    {
+        var auth = new BlockingRestoreAuth();
+        using var vm = new LoginViewModel(auth, new ImmediateDispatcher());
+
+        Task run = Run(vm);
+        await auth.Entered.WaitAsync(Patience);
+        Assert.Equal(LoginState.Restoring, vm.State);
+        Assert.False(auth.RestoreToken.IsCancellationRequested);
+
+        vm.CancelCommand.Execute(null);
+        auth.Release();
+        await Finish(run);
+
+        Assert.True(auth.RestoreToken.IsCancellationRequested);
+        Assert.Equal(0, auth.QrCalls);
+        Assert.Equal(LoginState.Cancelled, vm.State);
+        Assert.Equal(LoginFailure.None, vm.Failure);
+        Assert.Null(vm.QrPng);
+        Assert.Null(vm.Session);
+
+        // The guard is free again: a new run enters the service (restore is already released, so it goes on to QR).
+        await Finish(Run(vm));
+        Assert.Equal(1, auth.QrCalls);
+        Assert.Equal(LoginState.SignedIn, vm.State);
+    }
+
+    [Fact]
+    public async Task Dispose_during_restore_does_not_throw_and_releases_the_guard()
+    {
+        var auth = new BlockingRestoreAuth();
+        var vm = new LoginViewModel(auth, new ImmediateDispatcher());
+
+        Task run = Run(vm);
+        await auth.Entered.WaitAsync(Patience);
+
+        vm.Dispose();
+        auth.Release();
+        await Finish(run);
+
+        Assert.True(auth.RestoreToken.IsCancellationRequested);
+        Assert.Equal(0, auth.QrCalls);
+        Assert.Equal(LoginState.Cancelled, vm.State);
+        Assert.False(vm.StartCommand.IsRunning);
+
+        // The run guard (0 = idle) must be back to idle once the run has unwound.
+        var guard = typeof(LoginViewModel).GetField("_running", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(guard);
+        Assert.Equal(0, (int)guard!.GetValue(vm)!);
+
+        // A start after Dispose is ignored and must not reach the service again.
+        await Finish(Run(vm));
+        Assert.Equal(0, auth.QrCalls);
+        Assert.Equal(0, (int)guard.GetValue(vm)!);
     }
 
     [Fact]
