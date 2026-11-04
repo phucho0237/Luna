@@ -1,4 +1,8 @@
-﻿using Microsoft.UI.Xaml;
+﻿using Luna.Core.Auth;
+using Luna.Core.Sessions;
+using Luna.Core.ViewModels;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Data;
@@ -35,16 +39,31 @@ namespace Luna.App
         public App()
         {
             InitializeComponent();
+            UnhandledException += OnUnhandledException;
         }
 
         /// <summary>
-        /// Invoked when the application is launched.
+        /// Invoked when the application is launched. This is the composition root: the session is stored with
+        /// DPAPI exactly as Luna.Playground does it, and the view models are built on the UI thread.
         /// </summary>
         /// <param name="args">Details about the launch request and process.</param>
         protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
         {
-            _window = new MainWindow();
+            var store = new EncryptedFileSessionStore(EncryptedFileSessionStore.DefaultPath, new DpapiSecretProtector());
+            var auth = new AuthService(store);
+            var login = new LoginViewModel(auth, new WinUiDispatcher(DispatcherQueue.GetForCurrentThread()));
+            var shell = new ShellViewModel(login);
+            _window = new MainWindow(shell);
             _window.Activate();
+        }
+
+        // Once the main window exists the login view model already shows Failed/Unexpected for a bug, so the app stays
+        // open. Before that (a failure while starting up) there is nothing to show, so the exception is only logged
+        // and the process ends. The log line has no exception message (it can carry data); writing it never throws.
+        private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+        {
+            e.Handled = _window is not null;
+            CrashLog.Write(e.Exception);
         }
     }
 }

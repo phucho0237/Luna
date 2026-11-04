@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+
+  <!-- Window -->
+  <data name="AppTitle" xml:space="preserve">
+    <value>Luna</value>
+  </data>
+
+  <!-- Login: one text per LoginState (Login_State_<name>) -->
+  <data name="Login_State_Idle" xml:space="preserve">
+    <value>Sẵn sàng đăng nhập bằng mã QR.</value>
+  </data>
+  <data name="Login_State_Restoring" xml:space="preserve">
+    <value>Đang khôi phục phiên đăng nhập...</value>
+  </data>
+  <data name="Login_State_WaitingForScan" xml:space="preserve">
+    <value>Đang chờ bạn quét mã QR.</value>
+  </data>
+  <data name="Login_State_WaitingForConfirm" xml:space="preserve">
+    <value>Đã quét mã. Hãy xác nhận đăng nhập trên điện thoại.</value>
+  </data>
+  <data name="Login_State_RefreshingCode" xml:space="preserve">
+    <value>Mã QR đã hết hạn. Đang tạo mã mới...</value>
+  </data>
+  <data name="Login_State_SignedIn" xml:space="preserve">
+    <value>Đã đăng nhập.</value>
+  </data>
+  <data name="Login_State_Declined" xml:space="preserve">
+    <value>Bạn đã từ chối đăng nhập trên điện thoại.</value>
+  </data>
+  <data name="Login_State_Cancelled" xml:space="preserve">
+    <value>Đã hủy đăng nhập.</value>
+  </data>
+  <data name="Login_State_Failed" xml:space="preserve">
+    <value>Đăng nhập không thành công.</value>
+  </data>
+
+  <!-- Login: one text per LoginFailure (Login_Failure_<name>); Server takes the numeric code as {0} -->
+  <data name="Login_Failure_None" xml:space="preserve">
+    <value>Đăng nhập không thành công.</value>
+  </data>
+  <data name="Login_Failure_Network" xml:space="preserve">
+    <value>Không kết nối được tới máy chủ. Hãy kiểm tra mạng rồi thử lại.</value>
+  </data>
+  <data name="Login_Failure_Server" xml:space="preserve">
+    <value>Máy chủ từ chối yêu cầu (mã lỗi {0}). Hãy thử lại sau.</value>
+  </data>
+  <data name="Login_Failure_QrTimedOut" xml:space="preserve">
+    <value>Mã QR đã hết thời gian chờ. Hãy thử lại.</value>
+  </data>
+  <data name="Login_Failure_UnexpectedResponse" xml:space="preserve">
+    <value>Máy chủ trả về dữ liệu không như mong đợi. Hãy thử lại sau.</value>
+  </data>
+  <data name="Login_Failure_Storage" xml:space="preserve">
+    <value>Không lưu được phiên đăng nhập trên máy này. Hãy kiểm tra dung lượng ổ đĩa và quyền truy cập thư mục.</value>
+  </data>
+  <data name="Login_Failure_Unexpected" xml:space="preserve">
+    <value>Đã xảy ra lỗi không mong muốn. Hãy thử lại.</value>
+  </data>
+
+  <!-- Login view: static texts bound with x:Uid -->
+  <data name="LoginBrand.Text" xml:space="preserve">
+    <value>Luna</value>
+  </data>
+  <data name="LoginHeading.Text" xml:space="preserve">
+    <value>Quét mã QR để đăng nhập</value>
+  </data>
+  <data name="LoginStep1.Text" xml:space="preserve">
+    <value>Mở ứng dụng nhắn tin trên điện thoại của bạn.</value>
+  </data>
+  <data name="LoginStep2.Text" xml:space="preserve">
+    <value>Nhấn vào biểu tượng quét mã QR trên thanh tìm kiếm.</value>
+  </data>
+  <data name="LoginStep3.Text" xml:space="preserve">
+    <value>Hướng camera vào mã ở trên để đăng nhập.</value>
+  </data>
+  <data name="LoginQrImage.AutomationProperties.Name" xml:space="preserve">
+    <value>Mã QR đăng nhập</value>
+  </data>
+  <data name="LoginProgress.AutomationProperties.Name" xml:space="preserve">
+    <value>Đang xử lý</value>
+  </data>
+  <data name="LoginStartButton.Content" xml:space="preserve">
+    <value>Đăng nhập bằng mã QR</value>
+  </data>
+  <data name="LoginStartButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Bắt đầu đăng nhập bằng mã QR</value>
+  </data>
+  <data name="LoginCancelButton.Content" xml:space="preserve">
+    <value>Hủy</value>
+  </data>
+  <data name="LoginCancelButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Hủy đăng nhập</value>
+  </data>
+
+  <!-- Home placeholder -->
+  <data name="HomeMessage.Text" xml:space="preserve">
+    <value>Bạn đã đăng nhập.</value>
+  </data>
+</root>

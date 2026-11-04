@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="Luna.App.LoginView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ScrollViewer
+        VerticalScrollBarVisibility="Auto"
+        HorizontalScrollBarVisibility="Disabled"
+        IsTabStop="False">
+        <StackPanel
+            HorizontalAlignment="Center"
+            MaxWidth="360"
+            Padding="24,32,24,32"
+            Spacing="12">
+
+            <TextBlock
+                x:Uid="LoginBrand"
+                HorizontalAlignment="Center"
+                FontSize="40"
+                FontWeight="SemiBold"
+                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+
+            <TextBlock
+                x:Uid="LoginHeading"
+                Style="{StaticResource BodyStrongTextBlockStyle}"
+                FontSize="16"
+                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                TextWrapping="Wrap"
+                TextAlignment="Center" />
+
+            <Grid Width="256" Height="256" HorizontalAlignment="Center">
+                <Image
+                    x:Name="QrImage"
+                    x:Uid="LoginQrImage"
+                    Width="256"
+                    Height="256"
+                    Stretch="Uniform" />
+                <ProgressRing
+                    x:Name="Progress"
+                    x:Uid="LoginProgress"
+                    Width="48"
+                    Height="48"
+                    IsActive="False"
+                    Visibility="Collapsed" />
+            </Grid>
+
+            <TextBlock
+                x:Name="Status"
+                AutomationProperties.LiveSetting="Polite"
+                MinHeight="40"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                TextWrapping="Wrap"
+                TextAlignment="Center" />
+
+            <StackPanel
+                Orientation="Horizontal"
+                HorizontalAlignment="Center"
+                Spacing="8">
+                <Button
+                    x:Name="StartButton"
+                    x:Uid="LoginStartButton"
+                    TabIndex="0"
+                    Style="{StaticResource AccentButtonStyle}"
+                    Visibility="Collapsed" />
+                <Button
+                    x:Name="CancelButton"
+                    x:Uid="LoginCancelButton"
+                    TabIndex="1"
+                    Visibility="Collapsed" />
+            </StackPanel>
+
+            <!-- The steps are always visible so the layout never jumps between login states. -->
+            <Grid
+                HorizontalAlignment="Stretch"
+                Margin="0,8,0,0"
+                ColumnSpacing="8"
+                RowSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="1." Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.AccessibilityView="Raw" />
+                <TextBlock Grid.Row="0" Grid.Column="1" x:Uid="LoginStep1" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="2." Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.AccessibilityView="Raw" />
+                <TextBlock Grid.Row="1" Grid.Column="1" x:Uid="LoginStep2" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="3." Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.AccessibilityView="Raw" />
+                <TextBlock Grid.Row="2" Grid.Column="1" x:Uid="LoginStep3" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
