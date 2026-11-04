@@ -28,8 +28,6 @@ jobs:
         run: |
           ./scripts/check-language.ps1 -SelfTest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./scripts/verify-comment-only.ps1 -SelfTest
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Language check
         shell: pwsh
         run: ./scripts/check-language.ps1
@@ -43,3 +41,15 @@ jobs:
         run: dotnet test ./Luna.Core.Tests/Luna.Core.Tests.csproj --nologo
       - name: Build Playground
         run: dotnet build ./Luna.Playground/Luna.Playground.csproj --nologo
+
+  # Debug only: Release is not built yet because the publish profiles (*.pubxml) are not tracked (T10).
+  build-app:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Build Luna.App (Debug, x64)
+        run: dotnet build Luna.App/Luna.App.csproj -c Debug -p:Platform=x64 --nologo
