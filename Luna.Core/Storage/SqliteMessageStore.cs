@@ -261,9 +261,17 @@ public sealed class SqliteMessageStore : IMessageStore
                 continue;
             }
 
+            // A message with neither a global nor a client id has no identity: it cannot be de-duplicated or recalled.
+            string? key = DedupeKey(message.MsgId, message.CliMsgId);
+            if (key is null)
+            {
+                skipped++;
+                continue;
+            }
+
             pType.Value = (int)message.ThreadType;
             pThread.Value = Db(message.ThreadId);
-            pKey.Value = DedupeKey(message.MsgId, message.CliMsgId);
+            pKey.Value = key;
             pMsgId.Value = Db(message.MsgId);
             pCliMsgId.Value = Db(message.CliMsgId);
             pTs.Value = timestampMs;
@@ -289,9 +297,21 @@ public sealed class SqliteMessageStore : IMessageStore
         return new StoreResult(inserted, duplicates, recalled, skipped);
     }
 
-    /// <summary>The global message id when it is usable, otherwise the client id prefixed with "c:".</summary>
-    private static string DedupeKey(string? msgId, string? cliMsgId) =>
-        UsableId(msgId) ?? "c:" + cliMsgId;
+    /// <summary>
+    /// The global message id when it is usable, otherwise the client id prefixed with "c:", or null when neither id is
+    /// usable (the message has no identity).
+    /// </summary>
+    private static string? DedupeKey(string? msgId, string? cliMsgId)
+    {
+        string? global = UsableId(msgId);
+        if (global is not null)
+        {
+            return global;
+        }
+
+        string? client = UsableId(cliMsgId);
+        return client is null ? null : "c:" + client;
+    }
 
     /// <summary>Null for an empty id or "0" (the server uses 0 for "no id"), otherwise the id itself.</summary>
     private static string? UsableId(string? id) =>

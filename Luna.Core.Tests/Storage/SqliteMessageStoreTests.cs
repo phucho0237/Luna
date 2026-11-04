@@ -145,6 +145,39 @@ public class SqliteMessageStoreTests
         Assert.Equal(new StoreResult(0, 1, 0, 0), repeated);
     }
 
+    [Theory]
+    [InlineData("0", "")]
+    [InlineData("", "")]
+    [InlineData("0", "0")]
+    [InlineData("", "0")]
+    public async Task A_message_with_no_usable_id_at_all_is_skipped_and_not_stored(string msgId, string cliMsgId)
+    {
+        using SqliteMessageStore store = NewMemoryStore();
+
+        StoreResult result = await store.SaveAsync(
+        [
+            FakeMessages.Text(ThreadType.User, FakeThread, msgId, cliMsgId, BaseTs, text: "fake text one"),
+            FakeMessages.Text(ThreadType.User, FakeThread, msgId, cliMsgId, BaseTs, text: "fake text two"),
+        ]);
+
+        Assert.Equal(new StoreResult(0, 0, 0, 2), result);
+        Assert.Empty(await store.GetPageAsync(ThreadType.User, FakeThread, null, 10));
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("")]
+    public async Task A_message_with_only_a_usable_client_id_is_still_stored(string msgId)
+    {
+        using SqliteMessageStore store = NewMemoryStore();
+
+        StoreResult result = await store.SaveAsync(
+            [FakeMessages.Text(ThreadType.User, FakeThread, msgId, "6001", BaseTs)]);
+
+        Assert.Equal(new StoreResult(1, 0, 0, 0), result);
+        Assert.Single(await store.GetPageAsync(ThreadType.User, FakeThread, null, 10));
+    }
+
     [Fact]
     public async Task The_same_ids_under_another_thread_or_thread_type_are_not_duplicates()
     {
