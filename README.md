@@ -6,17 +6,19 @@
 
 ## Status
 
-Working (verified with a secondary account): parameter encryption and request signing, QR code login, DPAPI-encrypted session storage and re-login without scanning, a WebSocket connection that receives real-time events, message parsing (text, sticker, image, file, quote, mention, recall), routing of socket events into typed events (incoming and recalled messages, delivery receipt, seen receipt, reaction, typing notice, friend request, pin, mute; group events are still unparsed), a diagnostic tool that shows event shapes without leaking data, the post-login API call framework (parameter encryption, two-layer response decryption, rate limiting, automatic cooldown after a 429 error), fetching the friend list with a single request, and sending one text message to "My Documents" (formerly `Cloud của tôi`) of the secondary account.
+Working (verified with a secondary account): parameter encryption and request signing, QR code login, DPAPI-encrypted session storage and re-login without scanning, a WebSocket connection that receives real-time events, message parsing (text, sticker, image, file, quote, mention, recall), routing of socket events into typed events (incoming and recalled messages, delivery receipt, seen receipt, reaction, typing notice, friend request, pin, mute; group events are still unparsed), a diagnostic tool that shows event shapes without leaking data, the post-login API call framework (parameter encryption, two-layer response decryption, rate limiting, automatic cooldown after a 429 error), fetching the friend list with a single request, the desktop login screen (a compact Vietnamese window with the QR code; QR sign-in and re-login without scanning were run with a secondary account), and sending one text message to "My Documents" (formerly `Cloud của tôi`) of the secondary account.
 
-In progress: sending to groups, quoting, recall, and parsing of group events. Not yet available: history, the WinUI 3 interface, notifications, voice calls, a release. The roadmap is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+Implemented and covered by automated tests, but not yet used by the app: local message storage in SQLite (de-duplication, paging, recall marking).
+
+In progress: the conversation list and the chat window of the desktop app, pulling history from the server, sending to groups, quoting, recall, and parsing of group events. Not yet available: showing messages in the app, notifications, voice calls, a release. The roadmap is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Structure
 
 | Project | Role |
 |---|---|
 | `Luna.Protocol` | Encryption, signing, HTTP, QR login, WebSocket. No UI. |
-| `Luna.Core` | Session storage, authentication service. |
-| `Luna.App` | WinUI 3 interface (nothing significant yet). |
+| `Luna.Core` | Session storage, authentication service, local message storage (SQLite), view models of the interface. |
+| `Luna.App` | WinUI 3 interface: the QR login screen so far; the conversation list and the chat window come next. |
 | `Luna.Protocol.Tests`, `Luna.Core.Tests` | xUnit tests. |
 | `Luna.Playground` | Console for developers to try things with a secondary account. Not released. |
 
@@ -24,7 +26,7 @@ The service protocol has no official documentation. [`docs/PROTOCOL.md`](docs/PR
 
 ## Build and test
 
-Requires Windows 10/11, the .NET 10 SDK and PowerShell 7. Building `Luna.App` also needs Visual Studio 2026 with the WinUI workload.
+Requires Windows 10/11, the .NET 10 SDK and PowerShell 7. Luna.App also builds with `dotnet build` (CI does it), but Visual Studio 2026 with the WinUI workload is the easiest way to run and debug it: open `Luna.slnx`, choose the `Luna.App (Unpackaged)` profile (Debug, x64) and press F5. Use a secondary account, and install the Windows App Runtime if the app asks for it.
 
 ```powershell
 dotnet test .\Luna.Protocol.Tests\Luna.Protocol.Tests.csproj
@@ -37,6 +39,8 @@ pwsh -NoProfile -File scripts\check.ps1
 - No telemetry. The code in this repository only talks to the service's own servers.
 - The login session is stored encrypted with DPAPI, bound to the Windows account, at `%LOCALAPPDATA%\Luna\session.bin`. DPAPI does **not** protect against malware running under the same Windows account.
 - Automated tests never connect to the live server.
+- The local message database (`%LOCALAPPDATA%\Luna\history.db`, not used by the app yet) is stored **unencrypted** for now.
+- The crash log (`%LOCALAPPDATA%\Luna\crash.log`) records only the time, the exception type and the stack trace, never messages or account data.
 - To report a vulnerability, see [`SECURITY.md`](SECURITY.md).
 
 ## Contributing

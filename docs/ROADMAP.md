@@ -14,7 +14,7 @@ Do the **first unfinished task** from the top down. When done, change `[ ]` to `
 
 ## Next up
 
-The T2 group is done in this order: T2a and T2b (collect real data with the Playground), then T2 (the router), then T2c (parsing event content).
+Current order: T7b (conversation list), then T7c (chat pane). T2c, T4b and T5b each need live runs with the secondary account, so they are done when the interface needs them.
 
 ### [x] T1. Message model and parser (2026-11-02 - the live-server part was run by Luca with the Playground)
 
@@ -151,7 +151,7 @@ Folder `Luna.Protocol/Api/`.
 - MVVM with `CommunityToolkit.Mvvm` (approved). Logic lives in view models in `Luna.Core/ViewModels` (namespace `Luna.Core.ViewModels`), free of any UI framework and of user-facing text; they expose states and flags and the view maps them to localized resources. They are tested in `Luna.Core.Tests`; XAML is only the interface.
 - Split into steps:
   - [x] **T7a-1. Login view models (no UI).** Done: `IAuthService` extracted from `AuthService`, `IUiDispatcher`, `LoginViewModel` (restore, then QR login; states `LoginState`, failures `LoginFailure` with the numeric server code only; single-flight start, cancel, dispose) and `ShellViewModel` (Login page until signed in, then Home), with tests using a scripted fake service and immediate and queueing dispatchers.
-  - [x] **T7a-2. Login screen.** Done except the visual check by the maintainer (the window was not run by the agent): QR login page presenting `LoginViewModel`, Vietnamese strings in `Luna.App/Strings/vi-VN/Resources.resw` with a guard test, `WinUiDispatcher`, `LoginText`, a bounded `crash.log`, and the composition root in `Luna.App` (`AuthService`, `EncryptedFileSessionStore`, `ShellViewModel`).
+  - [x] **T7a-2. Login screen.** Done (2026-11-05, checked by the maintainer with the secondary account: QR sign-in, cancel and retry, session restore, window size per page): QR login page presenting `LoginViewModel`, Vietnamese strings in `Luna.App/Strings/vi-VN/Resources.resw` with a guard test, `WinUiDispatcher`, `LoginText`, a bounded `crash.log`, and the composition root in `Luna.App` (`AuthService`, `EncryptedFileSessionStore`, `ShellViewModel`).
   - [ ] **T7b. Conversation list.** View model and view on top of `IMessageStore` and the friend list, shown on the Home page.
   - [ ] **T7c. Chat pane.** The message list must be **virtualized** and smooth with tens of thousands of messages, loading more when scrolling up. Support dark/light, DPI, Vietnamese input (IME).
 
