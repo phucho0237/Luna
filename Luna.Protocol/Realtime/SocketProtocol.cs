@@ -13,10 +13,14 @@ public sealed class SocketProtocol
 
     public byte[]? CipherKey { get; private set; }
 
-    public bool IsAuthenticated { get; private set; }
+    // Written by the receive loop, read by the ping loop and the reconnect loop: volatile for cross-thread visibility.
+    private volatile bool _isAuthenticated;
+    private volatile bool _duplicateConnection;
+
+    public bool IsAuthenticated => _isAuthenticated;
 
     /// <summary>The server reports that the account is open elsewhere (cmd 3000).</summary>
-    public bool DuplicateConnection { get; private set; }
+    public bool DuplicateConnection => _duplicateConnection;
 
     /// <returns>The decoded event, or null for a frame with no body.</returns>
     /// <exception cref="InvalidDataException">Corrupt frame or missing cipher key.</exception>
@@ -40,7 +44,7 @@ public sealed class SocketProtocol
         JsonElement payload = PayloadDecoder.DecodeEnvelope(envelope, CipherKey);
         if (frame.Cmd == CmdDuplicateConnection && frame.SubCmd == 0)
         {
-            DuplicateConnection = true;
+            _duplicateConnection = true;
         }
 
         return new SocketEvent(frame.Cmd, frame.SubCmd, payload);
@@ -63,7 +67,7 @@ public sealed class SocketProtocol
             throw new ApiException(code, JsonFields.ErrorMessage(auth));
         }
 
-        IsAuthenticated = true;
+        _isAuthenticated = true;
         return new SocketEvent(frame.Cmd, frame.SubCmd, auth);
     }
 }
