@@ -23,9 +23,13 @@ namespace Luna.App
     /// </summary>
     public sealed partial class MainWindow : Window
     {
-        public MainWindow()
+        public MainWindow(Luna.Core.ViewModels.ShellViewModel shell)
         {
+            ArgumentNullException.ThrowIfNull(shell);
+            Shell = shell;
             InitializeComponent();
         }
+
+        public Luna.Core.ViewModels.ShellViewModel Shell { get; }
     }
 }
