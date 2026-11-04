@@ -57,11 +57,12 @@ namespace Luna.App
             _window.Activate();
         }
 
-        // The login view model already shows Failed/Unexpected for a bug, so the app stays open. The log line has
-        // no exception message (it can carry data); writing it never throws.
-        private static void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+        // Once the main window exists the login view model already shows Failed/Unexpected for a bug, so the app stays
+        // open. Before that (a failure while starting up) there is nothing to show, so the exception is only logged
+        // and the process ends. The log line has no exception message (it can carry data); writing it never throws.
+        private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
         {
-            e.Handled = true;
+            e.Handled = _window is not null;
             CrashLog.Write(e.Exception);
         }
     }

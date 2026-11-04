@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using Luna.Core.Sessions;
 
@@ -55,6 +56,7 @@ public static class CrashLog
         string stack = (exception.StackTrace ?? string.Empty)
             .Replace("\r", string.Empty, StringComparison.Ordinal)
             .Replace("\n", " | ", StringComparison.Ordinal);
-        return $"{utc:yyyy-MM-ddTHH:mm:ssZ} {type} HResult=0x{exception.HResult:X8} {stack}";
+        string time = utc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+        return $"{time} {type} HResult=0x{exception.HResult:X8} {stack}";
     }
 }
