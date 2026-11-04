@@ -9,6 +9,9 @@ public sealed record SocketFrame(byte Version, ushort Cmd, byte SubCmd, string B
 {
     public const int HeaderLength = 4;
 
+    /// <summary>Prints the header numbers only; the body can hold message content, uids and phone numbers.</summary>
+    public override string ToString() => $"SocketFrame {{ Version = {Version}, Cmd = {Cmd}, SubCmd = {SubCmd} }}";
+
     public byte[] Encode()
     {
         byte[] body = Encoding.UTF8.GetBytes(Body);

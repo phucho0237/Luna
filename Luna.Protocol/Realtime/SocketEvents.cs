@@ -22,4 +22,8 @@ public enum SocketState
     DuplicateConnection,
 }
 
-public sealed record SocketStateChange(SocketState State, string? Detail = null);
+public sealed record SocketStateChange(SocketState State, string? Detail = null)
+{
+    /// <summary>Prints the state only; the detail can be a free-text disconnect reason.</summary>
+    public override string ToString() => $"SocketStateChange {{ State = {State} }}";
+}
