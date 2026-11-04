@@ -129,7 +129,12 @@ public sealed partial class LoginViewModel : ObservableObject, IDisposable
         try
         {
             AuthSession? session = await _auth.RestoreAsync(token).ConfigureAwait(false);
-            session ??= await _auth.LoginWithQrAsync(OnQrEvent, token).ConfigureAwait(false);
+            if (session is null)
+            {
+                // A restore that does not observe the token may still return after Cancel or Dispose.
+                token.ThrowIfCancellationRequested();
+                session = await _auth.LoginWithQrAsync(OnQrEvent, token).ConfigureAwait(false);
+            }
 
             Post(() =>
             {
