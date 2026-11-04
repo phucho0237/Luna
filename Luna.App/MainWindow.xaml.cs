@@ -14,12 +14,12 @@ namespace Luna.App;
 public sealed partial class MainWindow : Window
 {
     // Window sizes in device-independent pixels; WindowPlacement scales them by the window DPI.
-    private const int LoginWidthDips = 520;
-    private const int LoginHeightDips = 800;
-    private const int HomeWidthDips = 1100;
-    private const int HomeHeightDips = 760;
-    private const int MinWidthDips = 400;
-    private const int MinHeightDips = 560;
+    private const int LoginWidthDips = 420;
+    private const int LoginHeightDips = 680;
+    private const int HomeWidthDips = 1000;
+    private const int HomeHeightDips = 700;
+    private const int MinWidthDips = 360;
+    private const int MinHeightDips = 520;
     private const int MarginPixels = 16;
 
     private bool _started;

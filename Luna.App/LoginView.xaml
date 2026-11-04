@@ -10,9 +10,9 @@
         IsTabStop="False">
         <StackPanel
             HorizontalAlignment="Center"
-            MaxWidth="400"
+            MaxWidth="360"
             Padding="24,32,24,32"
-            Spacing="16">
+            Spacing="12">
 
             <TextBlock
                 x:Uid="LoginBrand"
@@ -23,17 +23,18 @@
 
             <TextBlock
                 x:Uid="LoginHeading"
-                Style="{StaticResource SubtitleTextBlockStyle}"
+                Style="{StaticResource BodyStrongTextBlockStyle}"
+                FontSize="16"
                 Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                 TextWrapping="Wrap"
                 TextAlignment="Center" />
 
-            <Grid Width="320" Height="320" HorizontalAlignment="Center">
+            <Grid Width="256" Height="256" HorizontalAlignment="Center">
                 <Image
                     x:Name="QrImage"
                     x:Uid="LoginQrImage"
-                    Width="320"
-                    Height="320"
+                    Width="256"
+                    Height="256"
                     Stretch="Uniform" />
                 <ProgressRing
                     x:Name="Progress"
