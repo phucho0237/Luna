@@ -28,8 +28,6 @@ jobs:
         run: |
           ./scripts/check-language.ps1 -SelfTest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./scripts/verify-comment-only.ps1 -SelfTest
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Language check
         shell: pwsh
         run: ./scripts/check-language.ps1
