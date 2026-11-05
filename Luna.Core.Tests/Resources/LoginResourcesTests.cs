@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using Luna.Core.Chat;
 using Luna.Core.Friends;
 using Luna.Core.Realtime;
 using Luna.Core.ViewModels;
@@ -110,6 +111,52 @@ public class LoginResourcesTests
         var button = Entries.Value.Single(e => e.Name == "HomeReconnectButton.Content");
 
         Assert.Contains(button.Value, entry.Value, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ---- Chat pane ----------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Every_message_kind_except_Text_has_a_text_without_a_slot()
+    {
+        AssertKeysWithoutSlot(Enum.GetNames<MessageKind>()
+            .Where(name => name != nameof(MessageKind.Text))
+            .Select(name => "Chat_Kind_" + name));
+    }
+
+    [Fact]
+    public void Every_chat_state_has_a_text_without_a_slot()
+    {
+        AssertKeysWithoutSlot(Enum.GetNames<ChatState>().Select(name => "Chat_State_" + name));
+    }
+
+    [Fact]
+    public void The_empty_chat_text_says_that_only_messages_received_while_the_app_ran_are_shown()
+    {
+        var entry = Entries.Value.Single(e => e.Name == "Chat_State_Empty");
+
+        Assert.Contains("khi ứng dụng đang chạy", entry.Value, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_group_sender_fallback_takes_the_short_id()
+    {
+        AssertKeysWithSlot(["Chat_Sender_Unknown"]);
+    }
+
+    [Fact]
+    public void The_chat_pane_has_its_static_texts_and_accessible_names()
+    {
+        string[] required =
+        [
+            "Chat_Sender_Self",
+            "Chat_Header_Subtitle",
+            "ChatLoadOlderButton.Content",
+            "ChatLoadOlderButton.AutomationProperties.Name",
+            "ChatMessageList.AutomationProperties.Name",
+            "ChatHeader.AutomationProperties.Name",
+        ];
+
+        AssertKeysWithoutSlot(required);
     }
 
     private static void AssertKeysWithoutSlot(IEnumerable<string> keys)
