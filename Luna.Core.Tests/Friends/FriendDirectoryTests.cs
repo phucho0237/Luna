@@ -183,6 +183,22 @@ public sealed class FriendDirectoryTests : IDisposable
     }
 
     [Fact]
+    public async Task A_RateLimitedException_from_the_source_is_always_treated_as_a_real_429()
+    {
+        // Documents an assumption, not a feature: the directory cannot tell a real HTTP 429 from a client-side
+        // RateLimitedException. This is only correct because ApiFriendListSource builds its client WITHOUT a
+        // per-endpoint interval (see ApiFriendListSourceTests), so the client never throws one on its own.
+        _source.Exception = new RateLimitedException();
+        ApiThrottleGuard guard = NewGuard();
+        FriendDirectory directory = NewDirectory(guard);
+
+        await directory.LoadAsync();
+
+        Assert.Equal(60, guard.MinutesRemaining());
+        Assert.Equal(FriendsState.CoolingDown, directory.State);
+    }
+
+    [Fact]
     public async Task The_block_survives_a_new_directory_on_the_same_guard_file()
     {
         _source.Exception = new RateLimitedException();
