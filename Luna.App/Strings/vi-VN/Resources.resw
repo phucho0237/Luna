@@ -252,12 +252,17 @@
     <value>Tin nhắn đã lưu trên máy này</value>
   </data>
 
-  <!-- Chat view: static texts bound with x:Uid -->
-  <data name="ChatLoadOlderButton.Content" xml:space="preserve">
-    <value>Tải tin nhắn cũ hơn</value>
+  <!-- Chat: the line above the oldest message. Loading while an older page is read; the start line when nothing older is stored. -->
+  <data name="Chat_LoadingOlder" xml:space="preserve">
+    <value>Đang tải tin nhắn cũ hơn...</value>
   </data>
-  <data name="ChatLoadOlderButton.AutomationProperties.Name" xml:space="preserve">
-    <value>Tải thêm tin nhắn cũ hơn</value>
+  <data name="Chat_StartOfStored" xml:space="preserve">
+    <value>Đây là tin nhắn cũ nhất đã lưu trên máy này</value>
+  </data>
+
+  <!-- Chat view: static texts bound with x:Uid -->
+  <data name="ChatLoadingOlderRing.AutomationProperties.Name" xml:space="preserve">
+    <value>Đang tải tin nhắn cũ hơn</value>
   </data>
   <data name="ChatMessageList.AutomationProperties.Name" xml:space="preserve">
     <value>Danh sách tin nhắn</value>

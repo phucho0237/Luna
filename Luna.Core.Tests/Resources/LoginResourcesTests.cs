@@ -150,13 +150,43 @@ public class LoginResourcesTests
         [
             "Chat_Sender_Self",
             "Chat_Header_Subtitle",
-            "ChatLoadOlderButton.Content",
-            "ChatLoadOlderButton.AutomationProperties.Name",
             "ChatMessageList.AutomationProperties.Name",
             "ChatHeader.AutomationProperties.Name",
         ];
 
         AssertKeysWithoutSlot(required);
+    }
+
+    [Fact]
+    public void The_infinite_scroll_indicators_have_texts_and_an_accessible_name()
+    {
+        string[] required =
+        [
+            "Chat_LoadingOlder",
+            "Chat_StartOfStored",
+            "ChatLoadingOlderRing.AutomationProperties.Name",
+        ];
+
+        AssertKeysWithoutSlot(required);
+    }
+
+    [Fact]
+    public void The_load_older_button_strings_are_gone()
+    {
+        string[] offending = Entries.Value
+            .Where(e => e.Name.StartsWith("ChatLoadOlderButton", StringComparison.Ordinal))
+            .Select(e => e.Name)
+            .ToArray();
+
+        Assert.True(offending.Length == 0, "Keys of the removed button: " + string.Join(", ", offending));
+    }
+
+    [Fact]
+    public void The_start_of_history_line_says_the_message_is_saved_on_this_computer()
+    {
+        var entry = Entries.Value.Single(e => e.Name == "Chat_StartOfStored");
+
+        Assert.Contains("trên máy này", entry.Value, StringComparison.Ordinal);
     }
 
     private static void AssertKeysWithoutSlot(IEnumerable<string> keys)
