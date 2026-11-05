@@ -138,7 +138,7 @@ internal sealed class FakeMessageStore : IMessageStore
 {
     private readonly object _lock = new();
     private readonly List<IReadOnlyList<ChatMessage>> _saved = [];
-    private readonly Queue<Task> _listGates = new();
+    private readonly Queue<(Task Gate, IReadOnlyList<ConversationSummary>? Result)> _listGates = new();
     private readonly TaskCompletionSource _saveGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _saveEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _saveCalls;
@@ -173,13 +173,19 @@ internal sealed class FakeMessageStore : IMessageStore
 
     public void ReleaseSave() => _saveGate.TrySetResult();
 
-    /// <summary>The next list call waits for the returned source; calls are gated in call order.</summary>
-    public TaskCompletionSource GateNextList()
+    /// <summary>The limit the last list call asked for.</summary>
+    public int LastListLimit { get; private set; }
+
+    /// <summary>
+    /// The next list call (in call order) waits for the returned source and then returns <paramref name="result"/>
+    /// (decided when the call starts), or <see cref="Conversations"/> when none is given.
+    /// </summary>
+    public TaskCompletionSource GateNextList(IReadOnlyList<ConversationSummary>? result = null)
     {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_lock)
         {
-            _listGates.Enqueue(gate.Task);
+            _listGates.Enqueue((gate.Task, result));
         }
 
         return gate;
@@ -222,11 +228,13 @@ internal sealed class FakeMessageStore : IMessageStore
     {
         Interlocked.Increment(ref _listCalls);
         Task? gate = null;
+        IReadOnlyList<ConversationSummary>? gated = null;
         lock (_lock)
         {
+            LastListLimit = limit;
             if (_listGates.Count > 0)
             {
-                gate = _listGates.Dequeue();
+                (gate, gated) = _listGates.Dequeue();
             }
         }
 
@@ -240,7 +248,7 @@ internal sealed class FakeMessageStore : IMessageStore
             throw ListException;
         }
 
-        return Conversations;
+        return gated ?? Conversations;
     }
 
     public void Dispose()
