@@ -39,6 +39,28 @@ public sealed record ChatMergePlan(bool IsReset, IReadOnlyList<ChatMergeOperatio
 /// </summary>
 public static class ChatMerge
 {
+    /// <summary>The first index of the ascending <paramref name="list"/> whose key is not before <paramref name="key"/>; the count when none.</summary>
+    public static int LowerBound(IReadOnlyList<MessageKey> list, MessageKey key)
+    {
+        ArgumentNullException.ThrowIfNull(list);
+        int low = 0;
+        int high = list.Count;
+        while (low < high)
+        {
+            int middle = low + ((high - low) / 2);
+            if (list[middle] < key)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        return low;
+    }
+
     /// <summary>
     /// Plans the merge of <paramref name="page"/> (the newest page) into <paramref name="current"/>; both are ascending by
     /// key without duplicates. <paramref name="changed"/> holds the keys whose content differs from what is shown; only
@@ -65,11 +87,12 @@ public static class ChatMerge
 
         if (current.Count > 0)
         {
-            HashSet<MessageKey> shown = [.. current];
+            // Binary searches: the shown list can hold tens of thousands of rows, the page only a few dozen.
             bool overlap = false;
             foreach (MessageKey key in page)
             {
-                if (shown.Contains(key))
+                int at = LowerBound(current, key);
+                if (at < current.Count && current[at] == key)
                 {
                     overlap = true;
                     break;
@@ -94,8 +117,8 @@ public static class ChatMerge
 
         // Merge the two ascending lists. "position" is the index in the list as it is after the steps already planned.
         var operations = new List<ChatMergeOperation>();
-        int currentIndex = 0;
-        int position = 0;
+        int currentIndex = LowerBound(current, page[0]);
+        int position = currentIndex;
         foreach (MessageKey key in page)
         {
             while (currentIndex < current.Count && current[currentIndex] < key)

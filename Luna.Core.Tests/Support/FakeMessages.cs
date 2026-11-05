@@ -20,14 +20,15 @@ internal static class FakeMessages
         string timestamp,
         string text = FakeText,
         string sender = FakeSender,
-        bool self = false)
+        bool self = false,
+        string displayName = FakeDisplayName)
     {
         var item = new Dictionary<string, object?>
         {
             ["msgId"] = msgId,
             ["cliMsgId"] = cliMsgId,
             ["msgType"] = "webchat",
-            ["dName"] = FakeDisplayName,
+            ["dName"] = displayName,
             ["ts"] = timestamp,
             ["content"] = text,
         };

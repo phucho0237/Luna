@@ -41,6 +41,22 @@ public sealed class MessageItem
 
     public string? Text { get; }
 
+    /// <summary>The store sort key of this message.</summary>
+    public MessageKey Key => new(TimestampMs, Id);
+
+    /// <summary>True when every shown value equals the one of <paramref name="other"/> (a different object may still be the same).</summary>
+    public bool HasSameContentAs(MessageItem? other)
+    {
+        return other is not null
+            && Id == other.Id
+            && IsSelf == other.IsSelf
+            && TimestampMs == other.TimestampMs
+            && Kind == other.Kind
+            && string.Equals(SenderName, other.SenderName, StringComparison.Ordinal)
+            && string.Equals(SenderShortId, other.SenderShortId, StringComparison.Ordinal)
+            && string.Equals(Text, other.Text, StringComparison.Ordinal);
+    }
+
     /// <summary>Never prints the text, the sender name or the short id.</summary>
     public override string ToString() => $"MessageItem {{ Id = {Id}, Kind = {Kind}, IsSelf = {IsSelf} }}";
 }
