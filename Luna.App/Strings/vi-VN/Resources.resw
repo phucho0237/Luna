@@ -105,11 +105,6 @@
     <value>Hủy đăng nhập</value>
   </data>
 
-  <!-- Home placeholder (replaced by the home page below) -->
-  <data name="HomeMessage.Text" xml:space="preserve">
-    <value>Bạn đã đăng nhập.</value>
-  </data>
-
   <!-- Home: one text per LiveSyncState (Home_Connection_<name>) -->
   <data name="Home_Connection_Stopped" xml:space="preserve">
     <value>Chưa kết nối.</value>
