@@ -221,6 +221,7 @@ internal sealed class FakeMessageStore : IMessageStore
         MessageCursor? before,
         int limit,
         bool includeRecalled = false,
+        bool includeRaw = true,
         CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<StoredMessage>>([]);
 
     public async Task<IReadOnlyList<ConversationSummary>> ListConversationsAsync(
