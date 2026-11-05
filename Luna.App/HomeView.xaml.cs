@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using Luna.Core.Realtime;
 using Luna.Core.ViewModels;
+using Luna.Protocol.Messaging;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -106,6 +107,7 @@ public sealed partial class HomeView : UserControl
         home.Conversations.PropertyChanged += OnHomePartChanged;
         home.Friends.PropertyChanged += OnHomePartChanged;
         home.LiveSync.PropertyChanged += OnHomePartChanged;
+        ChatPane.Attach(home.Chat);
         RefreshButton.Command = home.RefreshFriendsCommand;
         ReconnectButton.Command = home.ReconnectCommand;
 
@@ -135,7 +137,38 @@ public sealed partial class HomeView : UserControl
 
         RefreshButton.Command = null;
         ReconnectButton.Command = null;
+        ChatPane.Detach();
         SetItems([]);
+        ShowChatPane(false);
+    }
+
+    // The right column shows the chat pane while a conversation is chosen and the placeholder otherwise.
+    private void ShowChatPane(bool open)
+    {
+        ChatPane.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        PlaceholderText.Visibility = open ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    // A user choice: show the header, then open the conversation (or close the pane for no choice). The view model call
+    // never throws and posts its changes through the dispatcher.
+    private void OpenChat(ConversationRow? row)
+    {
+        HomeViewModel? home = _home;
+        if (home is null)
+        {
+            return;
+        }
+
+        if (row is null)
+        {
+            ShowChatPane(false);
+            _ = home.SelectConversationAsync(null);
+            return;
+        }
+
+        ChatPane.Show(row.Title, row.ThreadType == ThreadType.Group);
+        ShowChatPane(true);
+        _ = home.SelectConversationAsync(row.Item);
     }
 
     private void ShowUnavailable()
@@ -240,11 +273,19 @@ public sealed partial class HomeView : UserControl
                 // Minimal scrolling: nothing happens when the row is already fully visible.
                 ConversationList.ScrollIntoView(rows[index], ScrollIntoViewAlignment.Default);
                 _selectedKey = key;
+                // The chat stays open as it is (no reload); only a name that arrived later may change the header.
+                ChatPane.SetTitle(rows[index].Title);
             }
             else
             {
+                bool hadSelection = key is not null;
                 ConversationList.SelectedItem = null;
                 _selectedKey = null;
+                if (hadSelection)
+                {
+                    // The chosen conversation is no longer listed: close its chat pane.
+                    OpenChat(null);
+                }
             }
         }
         finally
@@ -253,7 +294,8 @@ public sealed partial class HomeView : UserControl
         }
     }
 
-    // Only records the user's choice. T7c will open the conversation from here; nothing is started now.
+    // Records the user's choice and opens that conversation in the chat pane. A selection restored by code after a list
+    // refresh never gets here (the restore flag), and the chat view model ignores the conversation that is already open.
     private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_restoringSelection || _home is null)
@@ -261,6 +303,8 @@ public sealed partial class HomeView : UserControl
             return;
         }
 
-        _selectedKey = (ConversationList.SelectedItem as ConversationRow)?.Key;
+        var row = ConversationList.SelectedItem as ConversationRow;
+        _selectedKey = row?.Key;
+        OpenChat(row);
     }
 }

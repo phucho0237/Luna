@@ -157,9 +157,11 @@
                 Width="1"
                 Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
-            <!-- Right column: only a placeholder until the chat pane (T7c). -->
-            <Grid x:Name="RightPane" Grid.Column="1" Padding="24">
+            <!-- Right column: the placeholder while nothing is selected, the chat pane once a conversation is chosen. -->
+            <Grid x:Name="RightPane" Grid.Column="1" Padding="16,16,16,0">
+                <local:ChatView x:Name="ChatPane" Visibility="Collapsed" />
                 <TextBlock
+                    x:Name="PlaceholderText"
                     x:Uid="HomePlaceholder"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
