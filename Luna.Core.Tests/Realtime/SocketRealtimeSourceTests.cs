@@ -64,6 +64,121 @@ public sealed class SocketRealtimeSourceTests
     }
 
     [Fact]
+    public void A_default_payload_yields_nothing_and_does_not_throw()
+    {
+        var parser = new MessageParser("fake-self-uid");
+
+        // default(JsonElement) is the "no payload at all" case: its ValueKind is Undefined.
+        Assert.Empty(SocketRealtimeSource.ExtractMessages(parser, new SocketEvent(501, 0, default)));
+        Assert.Empty(SocketRealtimeSource.ExtractMessages(parser, new SocketEvent(521, 0, default)));
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("42")]
+    [InlineData("\"text\"")]
+    [InlineData("true")]
+    [InlineData("[]")]
+    [InlineData("[{\"data\":{}}]")]
+    [InlineData("{\"data\":42}")]
+    [InlineData("{\"data\":\"text\"}")]
+    [InlineData("{\"data\":null}")]
+    [InlineData("{\"data\":[1,2]}")]
+    [InlineData("{\"data\":{\"msgs\":42}}")]
+    [InlineData("{\"data\":{\"msgs\":\"text\"}}")]
+    [InlineData("{\"data\":{\"msgs\":{\"a\":1}}}")]
+    [InlineData("{\"data\":{\"msgs\":[[1],{\"msgId\":{\"a\":1}}]}}")]
+    [InlineData("{\"data\":{\"msgs\":[{\"msgId\":1e999,\"ts\":-1e999,\"content\":[1],\"uidFrom\":{},\"idTo\":[]}]}}")]
+    [InlineData("{\"data\":{\"msgs\":[{\"msgId\":\"1\",\"ts\":\"99999999999999999999999999\",\"content\":{\"deleteMsg\":[1],\"globalMsgId\":{}}}]}}")]
+    [InlineData("{\"data\":{\"msgs\":[{\"msgId\":\"\ud800\",\"cliMsgId\":\"\udc00\",\"dName\":\"\ud800\",\"content\":\"\ud800\"}]}}")]
+    [InlineData("{\"data\":{\"msgs\":[{\"msgId\":\"1\",\"content\":{\"title\":1,\"href\":2,\"params\":{},\"childnumber\":\"x\"},\"quote\":42,\"mentions\":\"x\",\"propertyExt\":[]}]}}")]
+    public void Unusable_payloads_never_throw(string json)
+    {
+        var parser = new MessageParser("fake-self-uid");
+
+        // The result may be empty or hold whatever the parser could read; the point is that nothing is thrown.
+        foreach (ushort cmd in new ushort[] { 501, 521 })
+        {
+            IReadOnlyList<ChatMessage> messages = SocketRealtimeSource.ExtractMessages(parser, Event(cmd, json));
+            Assert.NotNull(messages);
+        }
+    }
+
+    [Fact]
+    public void A_valid_event_after_a_bad_one_is_still_parsed()
+    {
+        var parser = new MessageParser("fake-self-uid");
+
+        Assert.Empty(SocketRealtimeSource.ExtractMessages(parser, Event(501, """{"data":42}""")));
+        Assert.Empty(SocketRealtimeSource.ExtractMessages(parser, new SocketEvent(501, 0, default)));
+        IReadOnlyList<ChatMessage> messages = SocketRealtimeSource.ExtractMessages(parser, Event(501, UserPayload));
+
+        Assert.Equal("9001", Assert.Single(messages).MsgId);
+    }
+
+    [Fact]
+    public void A_payload_whose_document_was_disposed_yields_nothing_and_does_not_throw()
+    {
+        var parser = new MessageParser("fake-self-uid");
+        JsonDocument document = JsonDocument.Parse(UserPayload);
+        JsonElement dangling = document.RootElement;
+        document.Dispose();
+
+        // Reading a dangling element throws ObjectDisposedException, which is none of the exceptions the parser handles.
+        Assert.Empty(SocketRealtimeSource.ExtractMessages(parser, new SocketEvent(501, 0, dangling)));
+        Assert.Single(SocketRealtimeSource.ExtractMessages(parser, Event(501, UserPayload)));
+    }
+
+    public static TheoryData<Exception> ParserFailures() => new()
+    {
+        new ArgumentException("fake failure"),
+        new ArgumentOutOfRangeException("fake"),
+        new OverflowException("fake failure"),
+        new NullReferenceException("fake failure"),
+        new InvalidCastException("fake failure"),
+        new IndexOutOfRangeException("fake failure"),
+        new ArithmeticException("fake failure"),
+        new NotSupportedException("fake failure"),
+        new FormatException("fake failure"),
+        new Exception("fake failure"),
+    };
+
+    [Theory]
+    [MemberData(nameof(ParserFailures))]
+    public void Any_parser_failure_yields_nothing_and_never_ends_the_connection(Exception failure)
+    {
+        // The dropped exception could carry message content, so nothing of it may come out either.
+        IReadOnlyList<ChatMessage> messages = SocketRealtimeSource.ExtractMessages(
+            Event(501, UserPayload), _ => throw failure);
+
+        Assert.Empty(messages);
+    }
+
+    [Fact]
+    public void A_cancellation_is_not_swallowed()
+    {
+        Assert.Throws<OperationCanceledException>(() => SocketRealtimeSource.ExtractMessages(
+            Event(501, UserPayload), _ => throw new OperationCanceledException()));
+    }
+
+    [Fact]
+    public void The_guard_does_not_call_the_parser_for_events_without_messages()
+    {
+        int calls = 0;
+
+        IReadOnlyList<ChatMessage> messages = SocketRealtimeSource.ExtractMessages(
+            Event(502, UserPayload),
+            _ =>
+            {
+                calls++;
+                return [];
+            });
+
+        Assert.Empty(messages);
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
     public void ToString_prints_the_type_name_only()
     {
         var source = new SocketRealtimeSource(

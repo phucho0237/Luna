@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Luna.Core.Auth;
 using Luna.Protocol.Messaging;
 using Luna.Protocol.Realtime;
@@ -45,7 +44,17 @@ public sealed class SocketRealtimeSource : IRealtimeSource
     public static IReadOnlyList<ChatMessage> ExtractMessages(MessageParser parser, SocketEvent socketEvent)
     {
         ArgumentNullException.ThrowIfNull(parser);
+        return ExtractMessages(socketEvent, e => parser.Parse(e).Messages);
+    }
+
+    /// <summary>
+    /// Test seam of <see cref="ExtractMessages(MessageParser, SocketEvent)"/>: the same guard around any parse function.
+    /// </summary>
+    public static IReadOnlyList<ChatMessage> ExtractMessages(
+        SocketEvent socketEvent, Func<SocketEvent, IReadOnlyList<ChatMessage>> parse)
+    {
         ArgumentNullException.ThrowIfNull(socketEvent);
+        ArgumentNullException.ThrowIfNull(parse);
 
         if (socketEvent.Cmd is not (MessageParser.CmdUserMessage or MessageParser.CmdGroupMessage))
         {
@@ -54,10 +63,17 @@ public sealed class SocketRealtimeSource : IRealtimeSource
 
         try
         {
-            return parser.Parse(socketEvent).Messages;
+            return parse(socketEvent);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or FormatException or JsonException or KeyNotFoundException)
+        catch (OperationCanceledException)
         {
+            throw;
+        }
+        catch (Exception)
+        {
+            // Every other failure ends in an empty list: the socket client does not swallow callback exceptions, so one
+            // bad event would end the live connection. The exception is dropped on purpose because it could carry
+            // message content.
             return [];
         }
     }
