@@ -6,11 +6,35 @@
     xmlns:local="using:Luna.App">
 
     <Grid>
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="WidthStates">
+                <!-- Wide: both columns, nothing changes. -->
+                <VisualState x:Name="WideState">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="700" />
+                    </VisualState.StateTriggers>
+                </VisualState>
+                <!-- Narrow: the right column goes away and the left column takes the whole width. -->
+                <VisualState x:Name="NarrowState">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="0" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="LeftColumn.Width" Value="*" />
+                        <Setter Target="RightColumn.MinWidth" Value="0" />
+                        <Setter Target="RightColumn.Width" Value="0" />
+                        <Setter Target="RightPane.Visibility" Value="Collapsed" />
+                        <Setter Target="Divider.Visibility" Value="Collapsed" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+
         <!-- The two-column page. Hidden while there is no home view model. -->
         <Grid x:Name="Columns">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="340" />
-                <ColumnDefinition Width="*" />
+                <ColumnDefinition x:Name="LeftColumn" Width="340" />
+                <ColumnDefinition x:Name="RightColumn" Width="*" MinWidth="320" />
             </Grid.ColumnDefinitions>
 
             <!-- Left column: status, buttons and the conversation list. -->
@@ -127,13 +151,14 @@
             </Grid>
 
             <Border
+                x:Name="Divider"
                 Grid.Column="0"
                 HorizontalAlignment="Right"
                 Width="1"
                 Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
             <!-- Right column: only a placeholder until the chat pane (T7c). -->
-            <Grid Grid.Column="1" Padding="24">
+            <Grid x:Name="RightPane" Grid.Column="1" Padding="24">
                 <TextBlock
                     x:Uid="HomePlaceholder"
                     HorizontalAlignment="Center"
