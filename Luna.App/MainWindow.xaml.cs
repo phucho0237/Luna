@@ -20,6 +20,8 @@ public sealed partial class MainWindow : Window
     private const int HomeHeightDips = 700;
     private const int MinWidthDips = 360;
     private const int MinHeightDips = 520;
+    private const int HomeMinWidthDips = 720;
+    private const int HomeMinHeightDips = 480;
     private const int MarginPixels = 16;
 
     private bool _started;
@@ -38,6 +40,7 @@ public sealed partial class MainWindow : Window
         }
 
         LoginPane.Attach(shell.Login);
+        HomePane.Attach(shell);
         Shell.PropertyChanged += OnShellPropertyChanged;
         ApplyPage();
         Root.Loaded += OnRootLoaded;
@@ -102,7 +105,7 @@ public sealed partial class MainWindow : Window
                 : WindowPlacement.Compute(HomeWidthDips, HomeHeightDips, dpi, work.X, work.Y, work.Width, work.Height, MarginPixels);
 
             OverlappedPresenter? presenter = appWindow.Presenter as OverlappedPresenter;
-            ApplyMinimumSize(presenter, dpi, target);
+            ApplyMinimumSize(presenter, dpi, target, login);
             var bounds = new RectInt32(target.X, target.Y, target.Width, target.Height);
 
             if (!login)
@@ -144,16 +147,19 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    // The minimum never exceeds the placed size, so a small work area cannot force the window past its edge.
-    private static void ApplyMinimumSize(OverlappedPresenter? presenter, int dpi, PixelRect target)
+    // Each page has its own minimum. It never exceeds the placed size, so a small work area cannot force the window
+    // past its edge.
+    private static void ApplyMinimumSize(OverlappedPresenter? presenter, int dpi, PixelRect target, bool login)
     {
         if (presenter is null)
         {
             return;
         }
 
-        presenter.PreferredMinimumWidth = Math.Min(ScaleToPixels(MinWidthDips, dpi), target.Width);
-        presenter.PreferredMinimumHeight = Math.Min(ScaleToPixels(MinHeightDips, dpi), target.Height);
+        int minWidthDips = login ? MinWidthDips : HomeMinWidthDips;
+        int minHeightDips = login ? MinHeightDips : HomeMinHeightDips;
+        presenter.PreferredMinimumWidth = Math.Min(ScaleToPixels(minWidthDips, dpi), target.Width);
+        presenter.PreferredMinimumHeight = Math.Min(ScaleToPixels(minHeightDips, dpi), target.Height);
     }
 
     private static int ScaleToPixels(int dips, int dpi) => (int)Math.Round(dips * (double)dpi / WindowPlacement.BaseDpi);
@@ -166,6 +172,11 @@ public sealed partial class MainWindow : Window
     {
         Shell.PropertyChanged -= OnShellPropertyChanged;
         LoginPane.Detach();
+        HomePane.Detach();
+
+        // The shell first: it disposes the home (the live sync starts its safe shutdown and the owned friend source is
+        // closed), then the login. App closes the message store after this handler.
+        Shell.Dispose();
         Shell.Login.Dispose();
     }
 }

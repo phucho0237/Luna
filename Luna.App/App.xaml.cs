@@ -1,6 +1,11 @@
 ﻿using Luna.Core.Auth;
+using Luna.Core.Friends;
+using Luna.Core.Realtime;
 using Luna.Core.Sessions;
+using Luna.Core.Storage;
+using Luna.Core.Throttling;
 using Luna.Core.ViewModels;
+using Microsoft.Data.Sqlite;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -51,10 +56,62 @@ namespace Luna.App
         {
             var store = new EncryptedFileSessionStore(EncryptedFileSessionStore.DefaultPath, new DpapiSecretProtector());
             var auth = new AuthService(store);
-            var login = new LoginViewModel(auth, new WinUiDispatcher(DispatcherQueue.GetForCurrentThread()));
-            var shell = new ShellViewModel(login);
+            var ui = new WinUiDispatcher(DispatcherQueue.GetForCurrentThread());
+            var login = new LoginViewModel(auth, ui);
+
+            // One message store for the whole run. Without it there is no home factory, so the shell leaves Home null and
+            // the home page shows its "unavailable" line; the login still works.
+            SqliteMessageStore? messageStore = OpenMessageStore();
+            var shell = new ShellViewModel(login, messageStore is null ? null : CreateHomeFactory(messageStore, ui));
             _window = new MainWindow(shell);
+
+            // Registered AFTER the window's own Closed handler (it runs in the constructor above), because handlers run in
+            // registration order: the window first disposes the shell (home and live sync), then the store is closed.
+            if (messageStore is not null)
+            {
+                _window.Closed += (_, _) => messageStore.Dispose();
+            }
+
             _window.Activate();
+        }
+
+        // Opens the one message store. Only the failures a missing or locked folder, a damaged file or a database that is
+        // too new can cause are handled; the exception is logged by type only (CrashLog never writes the message).
+        private static SqliteMessageStore? OpenMessageStore()
+        {
+            try
+            {
+                return new SqliteMessageStore(MessageStoreDefaults.DefaultPath);
+            }
+            catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                CrashLog.Write(ex);
+                return null;
+            }
+        }
+
+        // Builds the home for a signed-in session. The friend source is owned by the home view model, which disposes it;
+        // the store is owned by the app. Only the three existing server touch points are created here: the friend list
+        // (behind the throttle guard), the live socket (one connection) and nothing else.
+        private static Func<AuthSession, HomeViewModel> CreateHomeFactory(SqliteMessageStore messageStore, IUiDispatcher ui)
+        {
+            return session =>
+            {
+                var friendSource = new ApiFriendListSource(session);
+                try
+                {
+                    return new HomeViewModel(
+                        new ConversationListViewModel(messageStore, messageStore, ui),
+                        new FriendDirectory(friendSource, new ApiThrottleGuard(), messageStore, ui),
+                        new LiveSyncService(new SocketRealtimeSource(session), messageStore, ui),
+                        [friendSource]);
+                }
+                catch (Exception)
+                {
+                    friendSource.Dispose();
+                    throw;
+                }
+            };
         }
 
         // Once the main window exists the login view model already shows Failed/Unexpected for a bug, so the app stays

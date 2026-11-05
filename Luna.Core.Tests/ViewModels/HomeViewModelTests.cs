@@ -37,7 +37,7 @@ public sealed class HomeViewModelTests : IDisposable
         _folder.Dispose();
     }
 
-    private HomeViewModel Create()
+    private HomeViewModel Create(IReadOnlyList<IDisposable>? ownedResources = null)
     {
         var ui = new ImmediateDispatcher();
         var guard = new ApiThrottleGuard(
@@ -45,7 +45,8 @@ public sealed class HomeViewModelTests : IDisposable
         var home = new HomeViewModel(
             new ConversationListViewModel(_store, _contacts, ui),
             new FriendDirectory(_friendSource, guard, _contacts, ui),
-            new LiveSyncService(_realtime, _store, ui));
+            new LiveSyncService(_realtime, _store, ui),
+            ownedResources);
         _created.Add(home);
         return home;
     }
@@ -253,6 +254,83 @@ public sealed class HomeViewModelTests : IDisposable
         Assert.Equal(0, _realtime.RunCalls);
         Assert.Equal(0, _friendSource.Calls);
         Assert.Equal(0, _store.ListCalls);
+    }
+
+    // ---- Owned resources -----------------------------------------------------------------------------------------
+
+    private sealed class CountingDisposable(Action? onDispose = null) : IDisposable
+    {
+        public int Count { get; private set; }
+
+        public void Dispose()
+        {
+            Count++;
+            onDispose?.Invoke();
+        }
+    }
+
+    [Fact]
+    public void Owned_resources_are_disposed_once_even_when_dispose_is_called_twice()
+    {
+        var first = new CountingDisposable();
+        var second = new CountingDisposable();
+        HomeViewModel home = Create([first, second]);
+
+        home.Dispose();
+        home.Dispose();
+
+        Assert.Equal(1, first.Count);
+        Assert.Equal(1, second.Count);
+    }
+
+    [Fact]
+    public void Owned_resources_stay_alive_until_dispose()
+    {
+        var resource = new CountingDisposable();
+        HomeViewModel home = Create([resource]);
+
+        Assert.Equal(0, resource.Count);
+        home.Dispose();
+        Assert.Equal(1, resource.Count);
+    }
+
+    [Fact]
+    public void Null_owned_resources_are_accepted()
+    {
+        HomeViewModel home = Create(null);
+
+        home.Dispose();
+        home.Dispose();
+    }
+
+    [Fact]
+    public void A_failing_resource_does_not_block_the_others_and_does_not_throw()
+    {
+        var before = new CountingDisposable();
+        var failing = new CountingDisposable(() => throw new InvalidOperationException("fake failure"));
+        var after = new CountingDisposable();
+        HomeViewModel home = Create([before, failing, after]);
+
+        home.Dispose();
+
+        Assert.Equal(1, before.Count);
+        Assert.Equal(1, failing.Count);
+        Assert.Equal(1, after.Count);
+    }
+
+    [Fact]
+    public async Task Owned_resources_are_disposed_after_the_live_sync_was_told_to_stop()
+    {
+        bool? sourceCancelledWhenDisposed = null;
+        var resource = new CountingDisposable(() =>
+            sourceCancelledWhenDisposed = _realtime.Tokens.Count > 0 && _realtime.Tokens[0].IsCancellationRequested);
+        HomeViewModel home = Create([resource]);
+        await StartAndWaitForFeedAsync(home);
+
+        home.Dispose();
+
+        Assert.Equal(1, resource.Count);
+        Assert.True(sourceCancelledWhenDisposed);
     }
 
     [Fact]

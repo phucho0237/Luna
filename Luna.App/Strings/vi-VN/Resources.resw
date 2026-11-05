@@ -105,8 +105,105 @@
     <value>Hủy đăng nhập</value>
   </data>
 
-  <!-- Home placeholder -->
-  <data name="HomeMessage.Text" xml:space="preserve">
-    <value>Bạn đã đăng nhập.</value>
+  <!-- Home: one text per LiveSyncState (Home_Connection_<name>) -->
+  <data name="Home_Connection_Stopped" xml:space="preserve">
+    <value>Chưa kết nối.</value>
+  </data>
+  <data name="Home_Connection_Connecting" xml:space="preserve">
+    <value>Đang kết nối...</value>
+  </data>
+  <data name="Home_Connection_Connected" xml:space="preserve">
+    <value>Đã kết nối.</value>
+  </data>
+  <data name="Home_Connection_Disconnected" xml:space="preserve">
+    <value>Mất kết nối với máy chủ.</value>
+  </data>
+  <data name="Home_Connection_DuplicateConnection" xml:space="preserve">
+    <value>Tài khoản đang được mở ở nơi khác. Nhấn Kết nối lại để dùng tài khoản ở đây.</value>
+  </data>
+
+  <!-- Home: one text per FriendsState (Home_Friends_<name>); Throttled and CoolingDown take the minutes as {0} -->
+  <data name="Home_Friends_NotLoaded" xml:space="preserve">
+    <value>Chưa tải danh sách bạn bè.</value>
+  </data>
+  <data name="Home_Friends_Loading" xml:space="preserve">
+    <value>Đang tải danh sách bạn bè...</value>
+  </data>
+  <data name="Home_Friends_Loaded" xml:space="preserve">
+    <value>Đã cập nhật danh sách bạn bè.</value>
+  </data>
+  <data name="Home_Friends_Throttled" xml:space="preserve">
+    <value>Danh sách bạn bè vừa được tải. Có thể làm mới lại sau {0} phút.</value>
+  </data>
+  <data name="Home_Friends_CoolingDown" xml:space="preserve">
+    <value>Máy chủ yêu cầu chờ. Sẽ không gửi yêu cầu nào trong {0} phút nữa.</value>
+  </data>
+  <data name="Home_Friends_Failed" xml:space="preserve">
+    <value>Không tải được danh sách bạn bè.</value>
+  </data>
+
+  <!-- Home: one text per FriendsFailure (Home_FriendsFailure_<name>); Server takes the numeric code as {0} -->
+  <data name="Home_FriendsFailure_None" xml:space="preserve">
+    <value>Không tải được danh sách bạn bè.</value>
+  </data>
+  <data name="Home_FriendsFailure_Network" xml:space="preserve">
+    <value>Không tải được danh sách bạn bè do lỗi mạng. Hãy thử lại sau.</value>
+  </data>
+  <data name="Home_FriendsFailure_Server" xml:space="preserve">
+    <value>Máy chủ từ chối yêu cầu tải danh sách bạn bè (mã lỗi {0}).</value>
+  </data>
+  <data name="Home_FriendsFailure_UnexpectedResponse" xml:space="preserve">
+    <value>Máy chủ trả về danh sách bạn bè không như mong đợi.</value>
+  </data>
+  <data name="Home_FriendsFailure_Storage" xml:space="preserve">
+    <value>Không lưu được danh sách bạn bè trên máy này.</value>
+  </data>
+
+  <!-- Home: conversation titles when no name is known; {0} = the last 4 characters of the id -->
+  <data name="Home_Conversation_UnknownUser" xml:space="preserve">
+    <value>Người dùng ...{0}</value>
+  </data>
+  <data name="Home_Conversation_Group" xml:space="preserve">
+    <value>Nhóm ...{0}</value>
+  </data>
+
+  <!-- Home: lines shown by code (HomeText) -->
+  <data name="Home_Empty" xml:space="preserve">
+    <value>Chưa có cuộc trò chuyện nào.</value>
+  </data>
+  <data name="Home_ListError" xml:space="preserve">
+    <value>Không đọc được danh sách trò chuyện trên máy này.</value>
+  </data>
+  <data name="Home_SaveProblem" xml:space="preserve">
+    <value>Một số tin nhắn mới chưa được lưu. Danh sách có thể chưa đầy đủ.</value>
+  </data>
+  <data name="Home_Unavailable" xml:space="preserve">
+    <value>Không mở được kho dữ liệu trên máy này nên chưa thể hiện danh sách trò chuyện.</value>
+  </data>
+
+  <!-- Home view: static texts bound with x:Uid -->
+  <data name="HomeBrand.Text" xml:space="preserve">
+    <value>Luna</value>
+  </data>
+  <data name="HomePlaceholder.Text" xml:space="preserve">
+    <value>Chọn một cuộc trò chuyện để xem tin nhắn.</value>
+  </data>
+  <data name="HomeRefreshButton.Content" xml:space="preserve">
+    <value>Làm mới bạn bè</value>
+  </data>
+  <data name="HomeRefreshButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Làm mới danh sách bạn bè</value>
+  </data>
+  <data name="HomeReconnectButton.Content" xml:space="preserve">
+    <value>Kết nối lại</value>
+  </data>
+  <data name="HomeReconnectButton.AutomationProperties.Name" xml:space="preserve">
+    <value>Kết nối lại với máy chủ</value>
+  </data>
+  <data name="HomeConversationList.AutomationProperties.Name" xml:space="preserve">
+    <value>Danh sách trò chuyện</value>
+  </data>
+  <data name="HomeConnectionDot.AutomationProperties.Name" xml:space="preserve">
+    <value>Trạng thái kết nối</value>
   </data>
 </root>

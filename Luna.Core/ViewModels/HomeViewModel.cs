@@ -11,7 +11,7 @@ namespace Luna.Core.ViewModels;
 /// guarded friend load runs and the list is refreshed with the new names. Nothing after step 1 can block or empty the
 /// stored list: their failures only change their own state. Live store events refresh the list, coalesced so a burst
 /// of batches causes at most one extra refresh. <see cref="Dispose"/> cancels everything and starts the safe shutdown
-/// of the live sync; it does not own the store or the friend source.
+/// of the live sync, then disposes the optional owned resources; it does not own the store.
 /// </summary>
 public sealed partial class HomeViewModel : ObservableObject, IDisposable
 {
@@ -22,7 +22,17 @@ public sealed partial class HomeViewModel : ObservableObject, IDisposable
     private int _refreshing;
     private int _dirty;
 
-    public HomeViewModel(ConversationListViewModel conversations, FriendDirectory friends, LiveSyncService liveSync)
+    private readonly IDisposable[] _ownedResources;
+
+    /// <param name="ownedResources">
+    /// Optional resources this page owns (for example the friend list source). They are disposed once, after the live
+    /// sync has been told to stop; a failure of one never blocks the others. Null means none.
+    /// </param>
+    public HomeViewModel(
+        ConversationListViewModel conversations,
+        FriendDirectory friends,
+        LiveSyncService liveSync,
+        IReadOnlyList<IDisposable>? ownedResources = null)
     {
         ArgumentNullException.ThrowIfNull(conversations);
         ArgumentNullException.ThrowIfNull(friends);
@@ -30,6 +40,7 @@ public sealed partial class HomeViewModel : ObservableObject, IDisposable
         Conversations = conversations;
         Friends = friends;
         LiveSync = liveSync;
+        _ownedResources = ownedResources is null ? [] : [.. ownedResources.Where(r => r is not null)];
         StartCommand = new AsyncRelayCommand(() => StartAsync());
         RefreshFriendsCommand = new AsyncRelayCommand(RefreshFriendsAsync);
         ReconnectCommand = new RelayCommand(Reconnect);
@@ -132,6 +143,18 @@ public sealed partial class HomeViewModel : ObservableObject, IDisposable
         LiveSync.MessagesStored -= OnMessagesStored;
         _cts.Cancel();
         LiveSync.Dispose();
+
+        foreach (IDisposable resource in _ownedResources)
+        {
+            try
+            {
+                resource.Dispose();
+            }
+            catch (Exception)
+            {
+                // A failing resource must not block the others; the message is dropped because it could carry data.
+            }
+        }
     }
 
     private async Task LoadFriendsAndRefreshAsync(CancellationToken token)
