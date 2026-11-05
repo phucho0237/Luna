@@ -10,10 +10,10 @@ namespace Luna.Core.Storage;
 /// (decision for T5a: no SQLCipher and no field encryption yet). Message text, uids and thread ids are sensitive:
 /// they never appear in exception messages, logs or ToString.
 /// </summary>
-public sealed class SqliteMessageStore : IMessageStore
+public sealed class SqliteMessageStore : IMessageStore, IContactStore
 {
     /// <summary>The schema version this build creates and understands (PRAGMA user_version).</summary>
-    public const int SchemaVersion = 1;
+    public const int SchemaVersion = 2;
 
     private const string MemoryPath = ":memory:";
 
@@ -37,7 +37,20 @@ public sealed class SqliteMessageStore : IMessageStore
             UNIQUE (thread_type, thread_id, dedupe_key)
         );
         CREATE INDEX IF NOT EXISTS ix_messages_thread_ts ON messages (thread_type, thread_id, ts DESC, id DESC);
+        CREATE TABLE IF NOT EXISTS contacts (
+            user_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL
+        );
         """;
+
+    private const string DeleteContactsSql = "DELETE FROM contacts";
+
+    private const string InsertContactSql = """
+        INSERT INTO contacts (user_id, name) VALUES ($uid, $name)
+        ON CONFLICT (user_id) DO UPDATE SET name = excluded.name
+        """;
+
+    private const string ContactsSql = "SELECT user_id, name FROM contacts";
 
     // ON CONFLICT DO NOTHING (not INSERT OR IGNORE): OR IGNORE would also swallow a NOT NULL violation silently,
     // and a corrupt message must fail the whole batch instead of being counted as a duplicate.
@@ -449,6 +462,98 @@ public sealed class SqliteMessageStore : IMessageStore
         }
 
         return conversations;
+    }
+
+    /// <inheritdoc />
+    public async Task ReplaceContactsAsync(IReadOnlyList<ContactName> contacts, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(contacts);
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await Task.Run(
+                () =>
+                {
+                    ThrowIfDisposed();
+                    cancellationToken.ThrowIfCancellationRequested();
+                    ReplaceContacts(contacts, cancellationToken);
+                },
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private void ReplaceContacts(IReadOnlyList<ContactName> contacts, CancellationToken cancellationToken)
+    {
+        // Disposing the transaction without Commit rolls everything back, including the DELETE.
+        using SqliteTransaction transaction = _connection.BeginTransaction();
+        ExecuteNonQuery(DeleteContactsSql, transaction);
+
+        using SqliteCommand insert = _connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = InsertContactSql;
+        SqliteParameter pUser = insert.Parameters.Add("$uid", SqliteType.Text);
+        SqliteParameter pName = insert.Parameters.Add("$name", SqliteType.Text);
+
+        foreach (ContactName? contact in contacts)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (contact is null)
+            {
+                continue;
+            }
+
+            pUser.Value = Db(contact.UserId);
+            pName.Value = Db(contact.Name);
+            insert.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, string>> GetContactsAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await Task.Run(
+                () =>
+                {
+                    ThrowIfDisposed();
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return ReadContacts();
+                },
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private Dictionary<string, string> ReadContacts()
+    {
+        using SqliteCommand command = _connection.CreateCommand();
+        command.CommandText = ContactsSql;
+
+        var contacts = new Dictionary<string, string>(StringComparer.Ordinal);
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            contacts[reader.GetString(0)] = reader.GetString(1);
+        }
+
+        return contacts;
     }
 
     private static void CheckLimit(int limit)

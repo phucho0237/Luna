@@ -14,7 +14,7 @@ Do the **first unfinished task** from the top down. When done, change `[ ]` to `
 
 ## Next up
 
-Current order: T7b (conversation list), then T7c (chat pane). T2c, T4b and T5b each need live runs with the secondary account, so they are done when the interface needs them.
+Current order: T7b-2 (home view and composition root), then T7c (chat pane). T2c, T4b, T5b and T5c each need live runs or research with the secondary account, so they are done when the interface needs them.
 
 ### [x] T1. Message model and parser (2026-11-02 - the live-server part was run by Luca with the Playground)
 
@@ -139,6 +139,12 @@ Folder `Luna.Protocol/Api/`.
 - Needs live shape runs with the secondary account first (run by Luca with `Luna.Playground`); the agent must not claim to have tried the live server.
 - Feed the result into `IMessageStore.SaveAsync`; respect the per-endpoint intervals and the 429 cooldown from T3d and T3e.
 
+### [ ] T5c. Message sync from the phone (research first)
+
+- Goal (Luca): older messages that exist only on the phone appear in the desktop app.
+- Two possible mechanisms: (1) pull what the server still keeps (T5b: the history frames and `/api/group/history`); (2) the official phone-to-desktop sync, which is undocumented and not in `docs/PROTOCOL.md`.
+- First read zca-js and ctdozlite for any sync or backup call (`scripts/ref-grep.ps1`), write down what is found with its evidence marker (`[Source]`), and decide the mechanism with Luca. Nothing here has been tried on the live server, and the agent must not claim to have tried it.
+- Before importing large histories decide two things with Luca: encryption at rest for `history.db` (today it is plain, see T5a) and the request budget (how many history requests per run and per hour, on top of the per-endpoint intervals and the 429 cooldown from T3d and T3e).
 ### [x] T6. Split out the WebSocket I/O so it can be tested
 
 - Put `ClientWebSocket` behind an interface (`IWebSocketConnection`) to test the reconnect loop: backoff, address switching, stopping when opened twice (`3000`), clean cancellation, ping sent only after authentication.
@@ -152,7 +158,8 @@ Folder `Luna.Protocol/Api/`.
 - Split into steps:
   - [x] **T7a-1. Login view models (no UI).** Done: `IAuthService` extracted from `AuthService`, `IUiDispatcher`, `LoginViewModel` (restore, then QR login; states `LoginState`, failures `LoginFailure` with the numeric server code only; single-flight start, cancel, dispose) and `ShellViewModel` (Login page until signed in, then Home), with tests using a scripted fake service and immediate and queueing dispatchers.
   - [x] **T7a-2. Login screen.** Done (2026-11-05, checked by the maintainer with the secondary account: QR sign-in, cancel and retry, session restore, window size per page): QR login page presenting `LoginViewModel`, Vietnamese strings in `Luna.App/Strings/vi-VN/Resources.resw` with a guard test, `WinUiDispatcher`, `LoginText`, a bounded `crash.log`, and the composition root in `Luna.App` (`AuthService`, `EncryptedFileSessionStore`, `ShellViewModel`).
-  - [ ] **T7b. Conversation list.** View model and view on top of `IMessageStore` and the friend list, shown on the Home page.
+  - [x] **T7b-1. Home view models (no UI).** Done: `contacts` table (schema v2) with `IContactStore`; `FriendDirectory` (one guarded `getfriends` load: the call is recorded before the request, a 10-minute minimum interval and the 60-minute block after a 429 both live in `ApiThrottleGuard`, never retried) over `ApiFriendListSource`, whose client has no interval of its own so the guard is the only judge; `LiveSyncService` over `IRealtimeSource` (`SocketRealtimeSource` is the thin adapter over `SocketClient`): one connection at most, no automatic restart after a duplicate connection or a failed source (only an explicit `Reconnect`), the socket callback only queues a batch and one writer saves it, safe shutdown order; `ConversationItem`, `ConversationListViewModel` (version counter, one atomic assignment) and `HomeViewModel` (stored list first, then the live feed, then the guarded friend load); `ShellViewModel` builds and owns the home through a `Func<AuthSession, HomeViewModel>`. All covered by tests with fakes; the live server was not touched.
+  - [ ] **T7b-2. Home view.** The WinUI part of the conversation list: `HomeView` presenting `HomeViewModel` (it calls `Home.StartCommand` when it loads; the shell does not), Vietnamese strings in `Resources.resw` (friend and live-sync states, the unnamed-conversation fallback, the empty and error states), the composition root in `Luna.App` (`SqliteMessageStore` at `MessageStoreDefaults.DefaultPath`, `ApiThrottleGuard`, `ApiFriendListSource`, `SocketRealtimeSource`, the factory passed to `ShellViewModel`; the owner of the store and the friend source disposes them), and the maintainer's live check with the secondary account (the conversation list shows, a message sent to the account appears in the list, a second login elsewhere shows the duplicate-connection state and the reconnect button works, one `getfriends` request per run).
   - [ ] **T7c. Chat pane.** The message list must be **virtualized** and smooth with tens of thousands of messages, loading more when scrolling up. Support dark/light, DPI, Vietnamese input (IME).
 
 ### T8. Desktop experience

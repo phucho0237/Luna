@@ -39,16 +39,16 @@ public class SqliteMessageStoreTests
     // ---- Schema ------------------------------------------------------------------------------------------------
 
     [Fact]
-    public void Schema_is_created_at_version_1_and_reopening_is_idempotent()
+    public void Schema_is_created_at_version_2_and_reopening_is_idempotent()
     {
         using var folder = new TempFolder();
         string path = DbPath(folder);
 
         new SqliteMessageStore(path).Dispose();
-        Assert.Equal(1, Scalar(path, "PRAGMA user_version"));
+        Assert.Equal(2, Scalar(path, "PRAGMA user_version"));
 
         new SqliteMessageStore(path).Dispose();
-        Assert.Equal(1, Scalar(path, "PRAGMA user_version"));
+        Assert.Equal(2, Scalar(path, "PRAGMA user_version"));
         Assert.Equal(1, Scalar(path, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'messages'"));
     }
 
