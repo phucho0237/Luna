@@ -731,6 +731,303 @@ public sealed class ChatViewModelTests : IDisposable
         Assert.Equal(MessageKind.Text, vm.Items[1].Kind);
     }
 
+    // ---- IsLoadingOlder and ReachedStart -----------------------------------------------------------------------------
+
+    // Seven messages, pages of three: the open shows 5..7 and 4 and below are older.
+    private async Task<ChatViewModel> OpenWithOlder()
+    {
+        await SaveRange(ThreadA, 1, 7);
+        ChatViewModel vm = Create(pageSize: 3);
+        await OpenAndShow(vm, Conv(ThreadA));
+        return vm;
+    }
+
+    // Starts an older load that waits at the store and shows the flag on the view side. Returns the load and its gate.
+    private async Task<(Task Load, TaskCompletionSource Gate)> StartGatedOlderLoad(ChatViewModel vm)
+    {
+        TaskCompletionSource gate = _store.GateNextPage();
+        int calls = _store.PageCalls;
+        Task load = vm.LoadOlderAsync();
+        await _store.WhenPageCalls(calls + 1).WaitAsync(Patience);
+        _ui.RunAll();
+        return (load, gate);
+    }
+
+    [Fact]
+    public async Task IsLoadingOlder_is_false_at_first_and_after_an_open()
+    {
+        ChatViewModel vm = await OpenWithOlder();
+
+        Assert.False(vm.IsLoadingOlder);
+    }
+
+    [Fact]
+    public async Task IsLoadingOlder_turns_on_only_through_the_dispatcher_and_off_when_the_page_is_applied()
+    {
+        ChatViewModel vm = await OpenWithOlder();
+        TaskCompletionSource gate = _store.GateNextPage();
+
+        Task load = vm.LoadOlderAsync();
+        await _store.WhenPageCalls(2).WaitAsync(Patience);
+        Assert.False(vm.IsLoadingOlder);
+
+        _ui.RunAll();
+        Assert.True(vm.IsLoadingOlder);
+
+        gate.SetResult();
+        await load.WaitAsync(Patience);
+        Assert.True(vm.IsLoadingOlder);
+
+        _ui.RunAll();
+        Assert.False(vm.IsLoadingOlder);
+        Assert.Equal(Expected(2, 3, 4, 5, 6, 7), Texts(vm));
+    }
+
+    [Fact]
+    public async Task IsLoadingOlder_is_reset_after_an_empty_older_page()
+    {
+        await SaveRange(ThreadA, 1, 3);
+        ChatViewModel vm = Create(pageSize: 3);
+        await OpenAndShow(vm, Conv(ThreadA));
+        Assert.True(vm.CanLoadOlder);
+
+        (Task load, TaskCompletionSource gate) = await StartGatedOlderLoad(vm);
+        Assert.True(vm.IsLoadingOlder);
+        gate.SetResult();
+        await load.WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.False(vm.IsLoadingOlder);
+        Assert.False(vm.CanLoadOlder);
+        Assert.True(vm.ReachedStart);
+    }
+
+    [Fact]
+    public async Task IsLoadingOlder_is_reset_after_a_failing_read_and_a_new_load_is_possible()
+    {
+        ChatViewModel vm = await OpenWithOlder();
+        _store.PageException = new InvalidOperationException("fake failure");
+
+        await vm.LoadOlderAsync().WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.False(vm.IsLoadingOlder);
+        Assert.True(vm.CanLoadOlder);
+        Assert.False(vm.ReachedStart);
+
+        _store.PageException = null;
+        await vm.LoadOlderAsync().WaitAsync(Patience);
+        _ui.RunAll();
+        Assert.False(vm.IsLoadingOlder);
+        Assert.Equal(Expected(2, 3, 4, 5, 6, 7), Texts(vm));
+    }
+
+    [Fact]
+    public async Task IsLoadingOlder_is_reset_when_the_caller_cancels_the_load()
+    {
+        ChatViewModel vm = await OpenWithOlder();
+        using var cts = new CancellationTokenSource();
+        TaskCompletionSource gate = _store.GateNextPage();
+
+        Task load = vm.LoadOlderAsync(cts.Token);
+        await _store.WhenPageCalls(2).WaitAsync(Patience);
+        _ui.RunAll();
+        Assert.True(vm.IsLoadingOlder);
+
+        await cts.CancelAsync();
+        await load.WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.False(vm.IsLoadingOlder);
+        Assert.Equal(Expected(5, 6, 7), Texts(vm));
+        gate.TrySetResult();
+    }
+
+    [Fact]
+    public async Task IsLoadingOlder_is_reset_when_the_chat_is_closed_meanwhile()
+    {
+        ChatViewModel vm = await OpenWithOlder();
+        (Task load, TaskCompletionSource gate) = await StartGatedOlderLoad(vm);
+        Assert.True(vm.IsLoadingOlder);
+
+        vm.Close();
+        _ui.RunAll();
+        Assert.False(vm.IsLoadingOlder);
+
+        gate.SetResult();
+        await load.WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.False(vm.IsLoadingOlder);
+        Assert.Empty(vm.Items);
+        Assert.Equal(ChatState.Idle, vm.State);
+    }
+
+    [Fact]
+    public async Task IsLoadingOlder_is_reset_when_another_conversation_is_opened_meanwhile()
+    {
+        await SaveRange(ThreadB, 20, 20);
+        ChatViewModel vm = await OpenWithOlder();
+        (Task load, TaskCompletionSource gate) = await StartGatedOlderLoad(vm);
+        Assert.True(vm.IsLoadingOlder);
+
+        await OpenAndShow(vm, Conv(ThreadB));
+        Assert.False(vm.IsLoadingOlder);
+
+        gate.SetResult();
+        await load.WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.False(vm.IsLoadingOlder);
+        Assert.Equal(Expected(20), Texts(vm));
+    }
+
+    [Fact]
+    public async Task IsLoadingOlder_is_reset_when_a_gap_reset_makes_the_older_page_stale()
+    {
+        await SaveRange(ThreadA, 1, 5);
+        ChatViewModel vm = Create(pageSize: 3);
+        await OpenAndShow(vm, Conv(ThreadA));
+        (Task load, TaskCompletionSource gate) = await StartGatedOlderLoad(vm);
+        Assert.True(vm.IsLoadingOlder);
+
+        await SaveRange(ThreadA, 6, 10);
+        await RefreshAndShow(vm);
+        gate.SetResult();
+        await load.WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.False(vm.IsLoadingOlder);
+        Assert.Equal(Expected(8, 9, 10), Texts(vm));
+    }
+
+    [Fact]
+    public async Task IsLoadingOlder_is_reset_when_the_chat_is_disposed_meanwhile()
+    {
+        ChatViewModel vm = await OpenWithOlder();
+        (Task load, TaskCompletionSource gate) = await StartGatedOlderLoad(vm);
+        Assert.True(vm.IsLoadingOlder);
+
+        vm.Dispose();
+        _ui.RunAll();
+        Assert.False(vm.IsLoadingOlder);
+
+        gate.TrySetResult();
+        await load.WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.False(vm.IsLoadingOlder);
+        Assert.Equal(Expected(5, 6, 7), Texts(vm));
+    }
+
+    [Fact]
+    public async Task Disposing_while_nothing_loads_posts_nothing()
+    {
+        ChatViewModel vm = await OpenWithOlder();
+
+        vm.Dispose();
+
+        Assert.Equal(0, _ui.Pending);
+    }
+
+    [Fact]
+    public async Task While_loading_a_second_call_makes_no_read_and_keeps_the_flag()
+    {
+        ChatViewModel vm = await OpenWithOlder();
+        (Task load, TaskCompletionSource gate) = await StartGatedOlderLoad(vm);
+        int calls = _store.PageCalls;
+
+        await vm.LoadOlderAsync().WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.Equal(calls, _store.PageCalls);
+        Assert.True(vm.IsLoadingOlder);
+
+        gate.SetResult();
+        await load.WaitAsync(Patience);
+        _ui.RunAll();
+        Assert.False(vm.IsLoadingOlder);
+    }
+
+    [Fact]
+    public async Task IsLoadingOlder_changes_are_announced()
+    {
+        ChatViewModel vm = await OpenWithOlder();
+        var raised = new List<string?>();
+        vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        (Task load, TaskCompletionSource gate) = await StartGatedOlderLoad(vm);
+        Assert.Contains(nameof(ChatViewModel.IsLoadingOlder), raised);
+        raised.Clear();
+
+        gate.SetResult();
+        await load.WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.Contains(nameof(ChatViewModel.IsLoadingOlder), raised);
+    }
+
+    [Fact]
+    public async Task ReachedStart_is_false_before_anything_is_open_while_loading_and_when_empty_or_failed()
+    {
+        await SaveRange(ThreadA, 1, 2);
+        ChatViewModel vm = Create();
+        Assert.False(vm.ReachedStart);
+
+        await vm.OpenAsync(Conv(ThreadA)).WaitAsync(Patience);
+        Assert.False(vm.ReachedStart);
+
+        _ui.RunAll();
+        Assert.True(vm.ReachedStart);
+
+        await OpenAndShow(vm, Conv("fake-thread-empty"));
+        Assert.Equal(ChatState.Empty, vm.State);
+        Assert.False(vm.ReachedStart);
+
+        _store.PageException = new InvalidOperationException("fake failure");
+        await OpenAndShow(vm, Conv("fake-thread-broken"));
+        Assert.Equal(ChatState.Error, vm.State);
+        Assert.False(vm.ReachedStart);
+    }
+
+    [Fact]
+    public async Task ReachedStart_is_false_while_older_messages_may_exist_and_true_once_exhausted()
+    {
+        ChatViewModel vm = await OpenWithOlder();
+        Assert.True(vm.CanLoadOlder);
+        Assert.False(vm.ReachedStart);
+
+        await vm.LoadOlderAsync().WaitAsync(Patience);
+        _ui.RunAll();
+        Assert.True(vm.CanLoadOlder);
+        Assert.False(vm.ReachedStart);
+
+        await vm.LoadOlderAsync().WaitAsync(Patience);
+        _ui.RunAll();
+        Assert.False(vm.CanLoadOlder);
+        Assert.True(vm.ReachedStart);
+        Assert.Equal(Expected(1, 2, 3, 4, 5, 6, 7), Texts(vm));
+    }
+
+    [Fact]
+    public async Task ReachedStart_is_true_when_the_first_page_is_not_full_and_is_announced_and_cleared_by_Close()
+    {
+        await SaveRange(ThreadA, 1, 2);
+        ChatViewModel vm = Create(pageSize: 3);
+        var raised = new List<string?>();
+        vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        await OpenAndShow(vm, Conv(ThreadA));
+        Assert.True(vm.ReachedStart);
+        Assert.Contains(nameof(ChatViewModel.ReachedStart), raised);
+
+        raised.Clear();
+        vm.Close();
+        _ui.RunAll();
+        Assert.False(vm.ReachedStart);
+        Assert.Contains(nameof(ChatViewModel.ReachedStart), raised);
+    }
+
     // ---- Construction and hygiene ------------------------------------------------------------------------------------
 
     [Fact]

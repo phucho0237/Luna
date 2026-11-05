@@ -40,6 +40,10 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     private MessageKey? _oldest;
     private bool _canLoadOlder;
 
+    // UI-side mirrors, written only by UI steps: the last value of IsLoadingOlder (read by Dispose) and of ReachedStart.
+    private bool _loadingOlderShown;
+    private bool _reachedStart;
+
     private int _refreshing;
     private int _dirty;
 
@@ -70,6 +74,23 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     /// <summary>True while the last page that was read came back full, so there may be older stored messages.</summary>
     [ObservableProperty]
     public partial bool CanLoadOlder { get; private set; }
+
+    /// <summary>
+    /// True from the moment an older page is claimed until it is applied, dropped or failed. Changed only through the
+    /// dispatcher, and always reset when the chat is closed, another conversation is opened or the chat is disposed.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsLoadingOlder { get; private set; }
+
+    /// <summary>
+    /// True when the state is Loaded, something is shown and no older stored message is known, that is, the oldest shown
+    /// message is the oldest one saved on this computer. Changed only through the dispatcher.
+    /// </summary>
+    public bool ReachedStart
+    {
+        get => _reachedStart;
+        private set => SetProperty(ref _reachedStart, value);
+    }
 
     /// <summary>Never prints messages, names or ids.</summary>
     public override string ToString() => nameof(ChatViewModel);
@@ -103,6 +124,8 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
             Items.Clear();
             State = ChatState.Loading;
             CanLoadOlder = false;
+            SetLoadingOlder(false);
+            UpdateReachedStart();
         });
 
         await LoadNewestAsync(version, item, initial: true, cancellationToken).ConfigureAwait(false);
@@ -131,6 +154,8 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
             Items.Clear();
             State = ChatState.Idle;
             CanLoadOlder = false;
+            SetLoadingOlder(false);
+            UpdateReachedStart();
         });
     }
 
@@ -219,6 +244,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
             _olderVersion = version;
         }
 
+        Post(version, () => SetLoadingOlder(true));
         bool posted = false;
         try
         {
@@ -254,6 +280,10 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
                         _olderVersion = -1;
                     }
                 }
+
+                // Dropped by the version guard when the chat was closed or another conversation opened meanwhile; those
+                // steps and Dispose reset the flag themselves.
+                Post(version, () => SetLoadingOlder(false));
             }
         }
     }
@@ -261,6 +291,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     /// <summary>Cancels the work in progress and drops every result that has not been applied yet. Safe to call twice.</summary>
     public void Dispose()
     {
+        bool resetFlag;
         lock (_gate)
         {
             if (_disposed)
@@ -270,9 +301,16 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
 
             _disposed = true;
             _version++;
+            resetFlag = _loadingOlderShown;
         }
 
         _cts.Cancel();
+
+        if (resetFlag)
+        {
+            // Not version guarded on purpose: the version was just bumped. Nothing is posted when no load was shown.
+            _ui.Post(() => SetLoadingOlder(false));
+        }
     }
 
     private bool IsDisposed()
@@ -345,8 +383,22 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         {
             State = ChatState.Error;
             CanLoadOlder = false;
+            UpdateReachedStart();
         }
     }
+
+    // UI step helpers. IsLoadingOlder only changes here, so the mirror Dispose reads always follows the property.
+    private void SetLoadingOlder(bool value)
+    {
+        IsLoadingOlder = value;
+        lock (_gate)
+        {
+            _loadingOlderShown = value;
+        }
+    }
+
+    private void UpdateReachedStart() =>
+        ReachedStart = State == ChatState.Loaded && Items.Count > 0 && !CanLoadOlder;
 
     // UI step: merges the newest page (ascending) into Items in place, using the plan of ChatMerge.
     private void ApplyNewest(List<MessageItem> page, bool pageFull)
@@ -413,6 +465,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         }
 
         SyncMirror();
+        UpdateReachedStart();
     }
 
     // UI step: inserts an older page (ascending) before the first shown message.
@@ -431,6 +484,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
 
         if (stale)
         {
+            SetLoadingOlder(false);
             return;
         }
 
@@ -448,6 +502,10 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
 
         CanLoadOlder = full;
         SyncMirror();
+        UpdateReachedStart();
+
+        // Last, so a listener that reacts to the flag already sees the inserted items and the new CanLoadOlder.
+        SetLoadingOlder(false);
     }
 
     private void SyncMirror()
