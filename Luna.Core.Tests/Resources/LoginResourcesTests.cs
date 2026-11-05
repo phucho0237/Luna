@@ -1,11 +1,14 @@
 using System.Xml.Linq;
+using Luna.Core.Friends;
+using Luna.Core.Realtime;
 using Luna.Core.ViewModels;
 
 namespace Luna.Core.Tests.Resources;
 
 /// <summary>
-/// Guards the Vietnamese resource file of Luna.App: every login state and failure has its text, and the file has no
-/// duplicate keys, empty values or old brand word. Luna.App cannot be referenced from here, so the file is parsed as XML.
+/// Guards the Vietnamese resource file of Luna.App: every login state and failure, and every live sync state, friends
+/// state and friends failure of the home page, has its text, and the file has no duplicate keys, empty values or old
+/// brand word. Luna.App cannot be referenced from here, so the file is parsed as XML.
 /// </summary>
 public class LoginResourcesTests
 {
@@ -42,6 +45,89 @@ public class LoginResourcesTests
         var entry = Entries.Value.Single(e => e.Name == "Login_Failure_Server");
 
         Assert.Contains("{0}", entry.Value);
+    }
+
+    // ---- Home page ----------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Every_live_sync_state_has_a_text_without_a_slot()
+    {
+        AssertKeysWithoutSlot(Enum.GetNames<LiveSyncState>().Select(name => "Home_Connection_" + name));
+    }
+
+    [Fact]
+    public void Every_friends_state_has_a_text_and_only_the_waiting_states_take_minutes()
+    {
+        string[] withMinutes = [nameof(FriendsState.Throttled), nameof(FriendsState.CoolingDown)];
+
+        AssertKeysWithoutSlot(Enum.GetNames<FriendsState>()
+            .Where(name => !withMinutes.Contains(name))
+            .Select(name => "Home_Friends_" + name));
+        AssertKeysWithSlot(withMinutes.Select(name => "Home_Friends_" + name));
+    }
+
+    [Fact]
+    public void Every_friends_failure_has_a_text_and_only_the_server_failure_takes_the_code()
+    {
+        AssertKeysWithoutSlot(Enum.GetNames<FriendsFailure>()
+            .Where(name => name != nameof(FriendsFailure.Server))
+            .Select(name => "Home_FriendsFailure_" + name));
+        AssertKeysWithSlot(["Home_FriendsFailure_Server"]);
+    }
+
+    [Fact]
+    public void The_conversation_fallback_titles_take_the_id_suffix()
+    {
+        AssertKeysWithSlot(["Home_Conversation_UnknownUser", "Home_Conversation_Group"]);
+    }
+
+    [Fact]
+    public void The_home_page_has_its_static_texts_and_accessible_names()
+    {
+        string[] required =
+        [
+            "Home_Empty",
+            "Home_ListError",
+            "Home_SaveProblem",
+            "Home_Unavailable",
+            "HomeBrand.Text",
+            "HomePlaceholder.Text",
+            "HomeRefreshButton.Content",
+            "HomeRefreshButton.AutomationProperties.Name",
+            "HomeReconnectButton.Content",
+            "HomeReconnectButton.AutomationProperties.Name",
+            "HomeConversationList.AutomationProperties.Name",
+            "HomeConnectionDot.AutomationProperties.Name",
+        ];
+
+        AssertKeysWithoutSlot(required);
+    }
+
+    [Fact]
+    public void The_duplicate_connection_text_mentions_reconnecting()
+    {
+        var entry = Entries.Value.Single(e => e.Name == "Home_Connection_DuplicateConnection");
+        var button = Entries.Value.Single(e => e.Name == "HomeReconnectButton.Content");
+
+        Assert.Contains(button.Value, entry.Value, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void AssertKeysWithoutSlot(IEnumerable<string> keys)
+    {
+        string[] bad = keys
+            .Where(key => !Entries.Value.Any(e => e.Name == key && !e.Value.Contains("{0}", StringComparison.Ordinal)))
+            .ToArray();
+
+        Assert.True(bad.Length == 0, "Missing keys, or keys that must not contain {0}: " + string.Join(", ", bad));
+    }
+
+    private static void AssertKeysWithSlot(IEnumerable<string> keys)
+    {
+        string[] bad = keys
+            .Where(key => !Entries.Value.Any(e => e.Name == key && e.Value.Contains("{0}", StringComparison.Ordinal)))
+            .ToArray();
+
+        Assert.True(bad.Length == 0, "Missing keys, or keys without {0}: " + string.Join(", ", bad));
     }
 
     [Fact]
