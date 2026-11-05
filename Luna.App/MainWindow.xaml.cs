@@ -166,6 +166,10 @@ public sealed partial class MainWindow : Window
     {
         Shell.PropertyChanged -= OnShellPropertyChanged;
         LoginPane.Detach();
+
+        // The shell first: it disposes the home (the live sync starts its safe shutdown and the owned friend source is
+        // closed), then the login. App closes the message store after this handler.
+        Shell.Dispose();
         Shell.Login.Dispose();
     }
 }
