@@ -17,6 +17,12 @@ namespace Luna.Core.Realtime;
 /// </summary>
 public sealed partial class LiveSyncService : ObservableObject, IDisposable
 {
+    /// <summary>
+    /// How many batches may wait for the writer. When the queue is full the NEWEST batch is dropped (the socket callback
+    /// never waits) and <see cref="DroppedBatches"/> counts it.
+    /// </summary>
+    public const int QueueCapacity = 1024;
+
     /// <summary>How long <see cref="Dispose"/> lets the writer drain before it cancels a save that is still running.</summary>
     public static readonly TimeSpan DisposeDrainTimeout = TimeSpan.FromSeconds(5);
 
@@ -27,6 +33,7 @@ public sealed partial class LiveSyncService : ObservableObject, IDisposable
 
     private Session? _session;
     private bool _disposed;
+    private int _dropped;
 
     public LiveSyncService(IRealtimeSource source, IMessageStore store, IUiDispatcher ui)
     {
@@ -52,6 +59,13 @@ public sealed partial class LiveSyncService : ObservableObject, IDisposable
     [ObservableProperty]
     public partial int SaveFailures { get; private set; }
 
+    /// <summary>
+    /// How many batches were dropped because the queue was full (the writer could not keep up). A batch that arrives
+    /// after the queue was completed (a straggler after a stop) is not counted.
+    /// </summary>
+    [ObservableProperty]
+    public partial int DroppedBatches { get; private set; }
+
     /// <summary>Raised on the UI thread after a batch changed the store (new or recalled messages).</summary>
     public event EventHandler? MessagesStored;
 
@@ -71,7 +85,7 @@ public sealed partial class LiveSyncService : ObservableObject, IDisposable
                 return;
             }
 
-            var session = new Session();
+            var session = new Session(OnBatchDropped);
             _session = session;
             session.Writer = Task.Run(() => WriteLoopAsync(session));
             StartRun(session);
@@ -266,14 +280,23 @@ public sealed partial class LiveSyncService : ObservableObject, IDisposable
         }
     }
 
-    // Socket thread. Only queues the batch: never waits for storage. A batch that arrives after the queue was completed
-    // (a straggler after a stop) is dropped by TryWrite.
+    // Socket thread. Only queues the batch: never waits for storage or for room. A full queue drops the batch and reports
+    // it through the channel's dropped-item callback (see OnBatchDropped); a batch that arrives after the queue was
+    // completed (a straggler after a stop) makes TryWrite return false without any callback, so it is not counted.
     private static void OnMessages(Session session, IReadOnlyList<ChatMessage> messages)
     {
         if (messages.Count > 0)
         {
             session.Queue.Writer.TryWrite(messages);
         }
+    }
+
+    // Called by the channel on the writing thread, only when a batch is dropped because the queue is full. Does no
+    // I/O: an increment and a dispatcher post.
+    private void OnBatchDropped(IReadOnlyList<ChatMessage> batch)
+    {
+        Interlocked.Increment(ref _dropped);
+        Post(() => DroppedBatches = Volatile.Read(ref _dropped));
     }
 
     private void OnState(Session session, int run, LiveSyncState state)
@@ -332,8 +355,14 @@ public sealed partial class LiveSyncService : ObservableObject, IDisposable
 
     private sealed class Session
     {
-        public Channel<IReadOnlyList<ChatMessage>> Queue { get; } =
-            Channel.CreateUnbounded<IReadOnlyList<ChatMessage>>(new UnboundedChannelOptions { SingleReader = true });
+        public Session(Action<IReadOnlyList<ChatMessage>> onDropped)
+        {
+            Queue = Channel.CreateBounded(
+                new BoundedChannelOptions(QueueCapacity) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true },
+                onDropped);
+        }
+
+        public Channel<IReadOnlyList<ChatMessage>> Queue { get; }
 
         public CancellationTokenSource SourceCts { get; set; } = new();
 

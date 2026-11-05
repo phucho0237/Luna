@@ -224,6 +224,71 @@ public sealed class LiveSyncServiceTests
         await service.StopAsync();
     }
 
+    // ---- Bounded queue -------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_full_queue_drops_batches_counts_them_and_the_callback_never_waits()
+    {
+        _store.BlockSave = true;
+        using LiveSyncService service = Create();
+        service.Start();
+        await _source.WhenRunCalls(1).WaitAsync(Patience);
+        ChatMessage message = Msg("9001");
+
+        // The first batch is taken by the writer and blocks in SaveAsync, so the queue itself starts empty.
+        _source.EmitMessages(message);
+        await _store.SaveEntered.WaitAsync(Patience);
+        int extra = 6;
+
+        // If the callback ever waited for room or for the store, this would not finish while the store is gated.
+        await Task.Factory.StartNew(
+            () =>
+            {
+                for (int i = 0; i < LiveSyncService.QueueCapacity + extra; i++)
+                {
+                    _source.EmitMessages(message);
+                }
+            },
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default).WaitAsync(Patience);
+
+        Assert.True(service.DroppedBatches > 0);
+        Assert.Equal(extra, service.DroppedBatches);
+
+        _store.ReleaseSave();
+        await Eventually(() => _store.Saved.Count == 1 + LiveSyncService.QueueCapacity);
+
+        // The writer keeps working after the overflow.
+        _source.EmitMessages(Msg("9002"));
+        await Eventually(() => _store.Saved.Count == 2 + LiveSyncService.QueueCapacity);
+        Assert.Equal(extra, service.DroppedBatches);
+        await service.StopAsync();
+    }
+
+    [Fact]
+    public async Task A_batch_written_after_the_queue_was_completed_is_not_counted_as_dropped()
+    {
+        using LiveSyncService service = Create();
+        service.Start();
+        await _source.WhenRunCalls(1).WaitAsync(Patience);
+        await service.StopAsync();
+
+        _source.EmitMessages(Msg("9101"));
+        await Task.Yield();
+
+        Assert.Equal(0, service.DroppedBatches);
+        Assert.Empty(_store.Saved);
+    }
+
+    [Fact]
+    public void Dropped_batches_start_at_zero()
+    {
+        using LiveSyncService service = Create();
+
+        Assert.Equal(0, service.DroppedBatches);
+    }
+
     // ---- Shutdown ------------------------------------------------------------------------------------------------
 
     [Fact]
