@@ -1,4 +1,5 @@
 using Luna.Core.Auth;
+using Luna.Core.Chat;
 using Luna.Core.Friends;
 using Luna.Core.Realtime;
 using Luna.Core.Tests.Support;
@@ -40,7 +41,8 @@ public sealed class ShellHomeTests : IDisposable
         var home = new HomeViewModel(
             new ConversationListViewModel(_store, _contacts, ui),
             new FriendDirectory(_friendSource, guard, _contacts, ui),
-            new LiveSyncService(feed, _store, ui));
+            new LiveSyncService(feed, _store, ui),
+            new ChatViewModel(_store, _contacts, ui));
         _homes.Add(home);
         return home;
     }

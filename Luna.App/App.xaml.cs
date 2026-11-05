@@ -1,4 +1,5 @@
 ﻿using Luna.Core.Auth;
+using Luna.Core.Chat;
 using Luna.Core.Friends;
 using Luna.Core.Realtime;
 using Luna.Core.Sessions;
@@ -104,6 +105,7 @@ namespace Luna.App
                         new ConversationListViewModel(messageStore, messageStore, ui),
                         new FriendDirectory(friendSource, new ApiThrottleGuard(), messageStore, ui),
                         new LiveSyncService(new SocketRealtimeSource(session), messageStore, ui),
+                        new ChatViewModel(messageStore, messageStore, ui),
                         [friendSource]);
                 }
                 catch (Exception)

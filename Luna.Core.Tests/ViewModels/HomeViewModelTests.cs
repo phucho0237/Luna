@@ -1,3 +1,4 @@
+using Luna.Core.Chat;
 using Luna.Core.Friends;
 using Luna.Core.Realtime;
 using Luna.Core.Storage;
@@ -46,6 +47,7 @@ public sealed class HomeViewModelTests : IDisposable
             new ConversationListViewModel(_store, _contacts, ui),
             new FriendDirectory(_friendSource, guard, _contacts, ui),
             new LiveSyncService(_realtime, _store, ui),
+            new ChatViewModel(_store, _contacts, ui),
             ownedResources);
         _created.Add(home);
         return home;
