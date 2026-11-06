@@ -49,11 +49,13 @@ public sealed partial class ChatView : UserControl
     private bool _pointerHooked;
     private readonly PointerEventHandler _onPointerPressed;
     private readonly PointerEventHandler _onPointerEnded;
+    private readonly RoutedEventHandler _onListLostFocus;
 
     public ChatView()
     {
         _onPointerPressed = OnListPointerPressed;
         _onPointerEnded = OnListPointerEnded;
+        _onListLostFocus = OnListLostFocus;
         InitializeComponent();
         MessageList.ItemsSource = _rows;
         SubtitleText.Text = HomeText.Get("Chat_Header_Subtitle");
@@ -92,6 +94,7 @@ public sealed partial class ChatView : UserControl
         {
             chat.PropertyChanged -= OnChatPropertyChanged;
             chat.Items.CollectionChanged -= OnItemsChanged;
+            chat.ReleaseOlderInserts();
         }
 
         UnhookScroller();
@@ -116,6 +119,7 @@ public sealed partial class ChatView : UserControl
     {
         _isGroup = isGroup;
         TitleText.Text = title;
+        _chat?.ReleaseOlderInserts();
         _rows.Clear();
         ResetPosition(pending: true);
         _autoLoadsSinceUserScroll = 0;
@@ -137,7 +141,12 @@ public sealed partial class ChatView : UserControl
         }
     }
 
-    private void OnViewUnloaded(object sender, RoutedEventArgs e) => UnhookScroller();
+    private void OnViewUnloaded(object sender, RoutedEventArgs e)
+    {
+        // No pointer event will arrive for a view that left the tree, so the hold must end here.
+        _chat?.ReleaseOlderInserts();
+        UnhookScroller();
+    }
 
     private void OnListSizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -164,6 +173,7 @@ public sealed partial class ChatView : UserControl
         MessageList.AddHandler(UIElement.PointerReleasedEvent, _onPointerEnded, true);
         MessageList.AddHandler(UIElement.PointerCaptureLostEvent, _onPointerEnded, true);
         MessageList.AddHandler(UIElement.PointerCanceledEvent, _onPointerEnded, true);
+        MessageList.LostFocus += _onListLostFocus;
     }
 
     private void UnhookPointer()
@@ -178,9 +188,45 @@ public sealed partial class ChatView : UserControl
         MessageList.RemoveHandler(UIElement.PointerReleasedEvent, _onPointerEnded);
         MessageList.RemoveHandler(UIElement.PointerCaptureLostEvent, _onPointerEnded);
         MessageList.RemoveHandler(UIElement.PointerCanceledEvent, _onPointerEnded);
+        MessageList.LostFocus -= _onListLostFocus;
     }
 
-    private void OnListPointerPressed(object sender, PointerRoutedEventArgs e) => _pointerDown = true;
+    private void OnListPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        _pointerDown = true;
+        _chat?.HoldOlderInserts();
+    }
+
+    // Safety net: a hold must never stay stuck when the pointer events do not arrive (for example the window lost focus while
+    // the button was down). LostFocus bubbles from the rows, so focus that only moves between elements of the list is ignored;
+    // when the new focus cannot be told, the hold ends (the safe direction).
+    private void OnListLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_chat is null)
+        {
+            return;
+        }
+
+        if (XamlRoot is { } root && FocusManager.GetFocusedElement(root) is DependencyObject focused && IsInsideList(focused))
+        {
+            return;
+        }
+
+        _chat.ReleaseOlderInserts();
+    }
+
+    private bool IsInsideList(DependencyObject element)
+    {
+        for (DependencyObject? current = element; current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (ReferenceEquals(current, MessageList))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     // Release, lost capture and cancel all end the hold. The chain starts again from zero, and the view looks once more: a
     // user who let go at the top gets the next page without having to scroll first.
@@ -192,6 +238,7 @@ public sealed partial class ChatView : UserControl
         }
 
         _pointerDown = false;
+        _chat?.ReleaseOlderInserts();
         _autoLoadsSinceUserScroll = 0;
         EvaluateLoadOlder();
     }
@@ -593,6 +640,7 @@ public sealed partial class ChatView : UserControl
             return;
         }
 
+        chat.ReleaseOlderInserts();
         ResetPosition(pending: true);
         DateTimeOffset now = DateTimeOffset.Now;
         foreach (MessageItem item in chat.Items)
