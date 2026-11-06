@@ -499,6 +499,177 @@ public sealed class ChatViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task A_bigger_older_page_returns_more_rows_in_order_and_keeps_the_cursor_consistent()
+    {
+        await SaveRange(ThreadA, 1, 20);
+        ChatViewModel vm = Create(pageSize: 3);
+        await OpenAndShow(vm, Conv(ThreadA));
+        MessageItem[] newest = [.. vm.Items];
+        Assert.Equal(Expected(18, 19, 20), Texts(vm));
+
+        await vm.LoadOlderAsync(8).WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.Equal(8, _store.Calls[1].Limit);
+        Assert.Equal(Expected(10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20), Texts(vm));
+        Assert.True(vm.CanLoadOlder);
+        for (int i = 0; i < newest.Length; i++)
+        {
+            Assert.Same(newest[i], vm.Items[8 + i]);
+        }
+
+        // The next page (default size) continues right before message 10: no gap and no overlap.
+        await vm.LoadOlderAsync().WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.Equal(new MessageCursor(1000, vm.Items.Single(i => i.Text == "fake-text-10").Id), _store.Calls[2].Before);
+        Assert.Equal(3, _store.Calls[2].Limit);
+        Assert.Equal(Expected(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20), Texts(vm));
+    }
+
+    [Fact]
+    public async Task A_null_page_size_keeps_the_constructor_page_size()
+    {
+        await SaveRange(ThreadA, 1, 10);
+        ChatViewModel vm = Create(pageSize: 3);
+        await OpenAndShow(vm, Conv(ThreadA));
+
+        await vm.LoadOlderAsync(null).WaitAsync(Patience);
+
+        Assert.Equal(3, _store.Calls[1].Limit);
+    }
+
+    [Fact]
+    public async Task An_older_page_shorter_than_the_requested_size_means_the_history_is_exhausted()
+    {
+        await SaveRange(ThreadA, 1, 10);
+        ChatViewModel vm = Create(pageSize: 3);
+        await OpenAndShow(vm, Conv(ThreadA));
+        Assert.Equal(Expected(8, 9, 10), Texts(vm));
+
+        // Seven messages are older: more than the constructor size (3) but fewer than the requested size (10).
+        await vm.LoadOlderAsync(10).WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.Equal(Expected(1, 2, 3, 4, 5, 6, 7, 8, 9, 10), Texts(vm));
+        Assert.False(vm.CanLoadOlder);
+        Assert.True(vm.ReachedStart);
+    }
+
+    [Fact]
+    public async Task An_older_page_as_long_as_the_requested_size_keeps_loading_possible()
+    {
+        await SaveRange(ThreadA, 1, 10);
+        ChatViewModel vm = Create(pageSize: 3);
+        await OpenAndShow(vm, Conv(ThreadA));
+
+        await vm.LoadOlderAsync(7).WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.Equal(Expected(1, 2, 3, 4, 5, 6, 7, 8, 9, 10), Texts(vm));
+        Assert.True(vm.CanLoadOlder);
+        Assert.False(vm.ReachedStart);
+    }
+
+    [Fact]
+    public async Task A_page_shorter_than_the_constructor_size_but_not_than_the_request_is_not_exhausted_by_the_constructor_size()
+    {
+        await SaveRange(ThreadA, 1, 6);
+        ChatViewModel vm = Create(pageSize: 5);
+        await OpenAndShow(vm, Conv(ThreadA));
+        Assert.Equal(Expected(2, 3, 4, 5, 6), Texts(vm));
+
+        // One older message exists; the request asks for 1, so the page is full.
+        await vm.LoadOlderAsync(1).WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.Equal(Expected(1, 2, 3, 4, 5, 6), Texts(vm));
+        Assert.True(vm.CanLoadOlder);
+    }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(0, 1)]
+    [InlineData(-1, 1)]
+    [InlineData(int.MinValue, 1)]
+    [InlineData(500, 500)]
+    [InlineData(501, 500)]
+    [InlineData(1000, 500)]
+    [InlineData(int.MaxValue, 500)]
+    public async Task The_requested_page_size_is_clamped_to_what_the_store_accepts(int requested, int expectedLimit)
+    {
+        await SaveRange(ThreadA, 1, 5);
+        ChatViewModel vm = Create(pageSize: 3);
+        await OpenAndShow(vm, Conv(ThreadA));
+
+        await vm.LoadOlderAsync(requested).WaitAsync(Patience);
+        _ui.RunAll();
+
+        // The store would reject a limit above its maximum and the failure would be swallowed, so a clamped read must work.
+        Assert.Equal(expectedLimit, _store.Calls[1].Limit);
+        Assert.False(vm.IsLoadingOlder);
+        Assert.True(vm.Items.Count > 3);
+    }
+
+    [Fact]
+    public async Task Two_overlapping_older_loads_with_different_sizes_make_one_store_read()
+    {
+        await SaveRange(ThreadA, 1, 12);
+        ChatViewModel vm = Create(pageSize: 3);
+        await OpenAndShow(vm, Conv(ThreadA));
+        TaskCompletionSource gate = _store.GateNextPage();
+
+        Task first = vm.LoadOlderAsync(4);
+        await _store.WhenPageCalls(2).WaitAsync(Patience);
+        await vm.LoadOlderAsync(8).WaitAsync(Patience);
+        gate.SetResult();
+        await first.WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.Equal(2, _store.PageCalls);
+        Assert.Equal(4, _store.Calls[1].Limit);
+        Assert.Equal(Expected(6, 7, 8, 9, 10, 11, 12), Texts(vm));
+    }
+
+    [Fact]
+    public async Task A_bigger_older_page_that_arrives_after_another_conversation_was_opened_is_dropped()
+    {
+        await SaveRange(ThreadA, 1, 12);
+        await SaveRange(ThreadB, 13, 13);
+        ChatViewModel vm = Create(pageSize: 3);
+        await OpenAndShow(vm, Conv(ThreadA));
+        TaskCompletionSource gate = _store.GateNextPage();
+
+        Task older = vm.LoadOlderAsync(8);
+        await _store.WhenPageCalls(2).WaitAsync(Patience);
+        await OpenAndShow(vm, Conv(ThreadB));
+        gate.SetResult();
+        await older.WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.Equal(Expected(13), Texts(vm));
+        Assert.False(vm.IsLoadingOlder);
+        Assert.False(vm.CanLoadOlder);
+    }
+
+    [Fact]
+    public async Task A_bigger_older_load_after_the_chat_was_closed_reads_nothing()
+    {
+        await SaveRange(ThreadA, 1, 12);
+        ChatViewModel vm = Create(pageSize: 3);
+        await OpenAndShow(vm, Conv(ThreadA));
+        vm.Close();
+        _ui.RunAll();
+        int calls = _store.PageCalls;
+
+        await vm.LoadOlderAsync(8).WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.Equal(calls, _store.PageCalls);
+        Assert.Empty(vm.Items);
+    }
+
+    [Fact]
     public async Task Two_overlapping_older_loads_make_one_store_read()
     {
         await SaveRange(ThreadA, 1, 7);
@@ -829,7 +1000,7 @@ public sealed class ChatViewModelTests : IDisposable
         using var cts = new CancellationTokenSource();
         TaskCompletionSource gate = _store.GateNextPage();
 
-        Task load = vm.LoadOlderAsync(cts.Token);
+        Task load = vm.LoadOlderAsync(cancellationToken: cts.Token);
         await _store.WhenPageCalls(2).WaitAsync(Patience);
         _ui.RunAll();
         Assert.True(vm.IsLoadingOlder);

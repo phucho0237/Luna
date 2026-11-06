@@ -22,6 +22,9 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     /// <summary>How many messages one page holds (the store allows at most 500).</summary>
     public const int DefaultPageSize = 50;
 
+    /// <summary>The most messages one page may hold (the limit of the store).</summary>
+    public const int MaxPageSize = 500;
+
     private readonly IMessageStore _store;
     private readonly IContactStore _contacts;
     private readonly IUiDispatcher _ui;
@@ -53,7 +56,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         ArgumentNullException.ThrowIfNull(contacts);
         ArgumentNullException.ThrowIfNull(ui);
         ArgumentOutOfRangeException.ThrowIfLessThan(pageSize, 1);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(pageSize, 500);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(pageSize, MaxPageSize);
         _store = store;
         _contacts = contacts;
         _ui = ui;
@@ -222,10 +225,12 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     /// <summary>
     /// Reads the page right before the oldest shown message and inserts it at the start of <see cref="Items"/>. Single
     /// flight, and only while <see cref="CanLoadOlder"/> is true. Never throws; a failure changes nothing, so the user can
-    /// try again.
+    /// try again. <paramref name="pageSize"/> is how many messages to read (null keeps the page size of the constructor); it
+    /// is clamped to 1..<see cref="MaxPageSize"/>, and a page shorter than the clamped size means no older message is left.
     /// </summary>
-    public async Task LoadOlderAsync(CancellationToken cancellationToken = default)
+    public async Task LoadOlderAsync(int? pageSize = null, CancellationToken cancellationToken = default)
     {
+        int size = pageSize is { } requested ? Math.Clamp(requested, 1, MaxPageSize) : _pageSize;
         ConversationItem item;
         MessageKey oldest;
         int version;
@@ -255,13 +260,13 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
                     item.ThreadType,
                     item.ThreadId,
                     new MessageCursor(oldest.TimestampMs, oldest.Id),
-                    _pageSize,
+                    size,
                     includeRecalled: true,
                     includeRaw: false,
                     cancellationToken: token)
                 .ConfigureAwait(false);
             List<MessageItem> older = await ToItemsAsync(item.ThreadType, page, token).ConfigureAwait(false);
-            bool full = page.Count >= _pageSize;
+            bool full = page.Count >= size;
             posted = true;
             Post(version, () => ApplyOlder(version, epoch, older, full));
         }

@@ -12,16 +12,121 @@ public class ChatScrollPolicyTests
         bool positioned = true,
         bool canLoad = true,
         bool loading = false,
-        int chain = 0) =>
-        ChatScrollPolicy.ShouldLoadOlder(positioned, offset, scrollable, viewport, canLoad, loading, chain);
+        int chain = 0,
+        bool dragging = false) =>
+        ChatScrollPolicy.ShouldLoadOlder(positioned, offset, scrollable, viewport, canLoad, loading, chain, dragging);
 
     [Fact]
     public void Constants_are_the_agreed_values()
     {
-        Assert.Equal(400, ChatScrollPolicy.LoadThresholdDips);
+        Assert.Equal(1200, ChatScrollPolicy.MinLoadThresholdDips);
         Assert.Equal(24, ChatScrollPolicy.BottomToleranceDips);
         Assert.Equal(2, ChatScrollPolicy.MaxChainWhenReading);
+        Assert.Equal(40, ChatScrollPolicy.MaxChainWhenDragging);
         Assert.Equal(12, ChatScrollPolicy.MaxChainWhenFilling);
+        Assert.Equal(50, ChatScrollPolicy.BasePageSize);
+        Assert.Equal(400, ChatScrollPolicy.MaxPageSize);
+    }
+
+    [Theory]
+    [InlineData(0, 1200)]
+    [InlineData(600, 1200)]
+    [InlineData(800, 1200)]
+    [InlineData(800.1, 1200.15)]
+    [InlineData(1000, 1500)]
+    [InlineData(2000, 3000)]
+    [InlineData(-5, 1200)]
+    [InlineData(double.NaN, 1200)]
+    [InlineData(double.NegativeInfinity, 1200)]
+    public void The_load_threshold_is_the_larger_of_the_minimum_and_one_and_a_half_viewports(double viewport, double expected)
+    {
+        Assert.Equal(expected, ChatScrollPolicy.LoadThreshold(viewport), 6);
+    }
+
+    [Fact]
+    public void The_load_threshold_of_an_infinite_viewport_is_finite_or_infinite_but_never_NaN()
+    {
+        Assert.False(double.IsNaN(ChatScrollPolicy.LoadThreshold(double.PositiveInfinity)));
+    }
+
+    [Theory]
+    [InlineData(0, 50)]
+    [InlineData(1, 100)]
+    [InlineData(2, 200)]
+    [InlineData(3, 400)]
+    [InlineData(4, 400)]
+    [InlineData(5, 400)]
+    [InlineData(10, 400)]
+    [InlineData(30, 400)]
+    [InlineData(31, 400)]
+    [InlineData(32, 400)]
+    [InlineData(63, 400)]
+    [InlineData(64, 400)]
+    [InlineData(1000, 400)]
+    [InlineData(int.MaxValue, 400)]
+    [InlineData(-1, 50)]
+    [InlineData(int.MinValue, 50)]
+    public void The_page_size_doubles_per_automatic_load_up_to_the_maximum(int consecutive, int expected)
+    {
+        Assert.Equal(expected, ChatScrollPolicy.NextPageSize(consecutive));
+    }
+
+    [Fact]
+    public void The_page_size_follows_custom_bounds()
+    {
+        Assert.Equal(10, ChatScrollPolicy.NextPageSize(0, basePageSize: 10, maxPageSize: 100));
+        Assert.Equal(80, ChatScrollPolicy.NextPageSize(3, basePageSize: 10, maxPageSize: 100));
+        Assert.Equal(100, ChatScrollPolicy.NextPageSize(4, basePageSize: 10, maxPageSize: 100));
+        Assert.Equal(100, ChatScrollPolicy.NextPageSize(int.MaxValue, basePageSize: 10, maxPageSize: 100));
+        Assert.Equal(7, ChatScrollPolicy.NextPageSize(5, basePageSize: 7, maxPageSize: 7));
+    }
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(39, true)]
+    [InlineData(40, false)]
+    [InlineData(41, false)]
+    [InlineData(int.MaxValue, false)]
+    public void A_held_pointer_raises_the_reading_cap_to_the_dragging_cap(int chain, bool expected)
+    {
+        Assert.Equal(expected, Should(offset: 10, scrollable: 20000, chain: chain, dragging: true));
+    }
+
+    [Fact]
+    public void Without_a_held_pointer_the_reading_cap_stays_two()
+    {
+        Assert.True(Should(offset: 10, scrollable: 20000, chain: 1, dragging: false));
+        Assert.False(Should(offset: 10, scrollable: 20000, chain: 2, dragging: false));
+        Assert.True(Should(offset: 10, scrollable: 20000, chain: 2, dragging: true));
+    }
+
+    [Theory]
+    [InlineData(11, true)]
+    [InlineData(12, false)]
+    [InlineData(13, false)]
+    public void The_filling_cap_is_the_same_whether_or_not_the_pointer_is_held(int chain, bool expected)
+    {
+        Assert.Equal(expected, Should(offset: 0, scrollable: 0, chain: chain, dragging: false));
+        Assert.Equal(expected, Should(offset: 0, scrollable: 0, chain: chain, dragging: true));
+    }
+
+    [Fact]
+    public void A_held_pointer_opens_no_other_branch()
+    {
+        Assert.False(Should(offset: 5000, scrollable: 20000, chain: 0, dragging: true));
+        Assert.False(Should(offset: 0, scrollable: 20000, chain: 0, dragging: true, canLoad: false));
+        Assert.False(Should(offset: 0, scrollable: 20000, chain: 0, dragging: true, loading: true));
+        Assert.False(Should(offset: 0, scrollable: 20000, chain: 0, dragging: true, positioned: false));
+        Assert.False(Should(offset: 0, scrollable: 20000, chain: 0, dragging: true, viewport: 0));
+        Assert.False(Should(offset: 0, scrollable: 20000, chain: -1, dragging: true, viewport: double.NaN));
+    }
+
+    [Fact]
+    public void A_negative_chain_with_a_held_pointer_counts_as_zero()
+    {
+        Assert.True(Should(offset: 10, scrollable: 20000, chain: int.MinValue, dragging: true));
     }
 
     [Theory]
@@ -100,26 +205,36 @@ public class ChatScrollPolicyTests
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
-    [InlineData(399.9)]
-    [InlineData(400)]
+    [InlineData(1199.9)]
+    [InlineData(1200)]
     public void Within_the_threshold_of_the_top_loads(double offset)
     {
         Assert.True(Should(offset: offset, scrollable: 20000));
     }
 
     [Theory]
-    [InlineData(400.1)]
-    [InlineData(401)]
+    [InlineData(1200.1)]
+    [InlineData(1201)]
     [InlineData(10000)]
     public void Beyond_the_threshold_does_not_load(double offset)
     {
         Assert.False(Should(offset: offset, scrollable: 20000));
     }
 
+    [Fact]
+    public void A_tall_viewport_widens_the_threshold_to_one_and_a_half_viewports()
+    {
+        // Viewport 1000 -> threshold 1500.
+        Assert.True(Should(offset: 1500, scrollable: 20000, viewport: 1000));
+        Assert.False(Should(offset: 1500.1, scrollable: 20000, viewport: 1000));
+        // The same offsets with a normal viewport (threshold 1200).
+        Assert.False(Should(offset: 1500, scrollable: 20000, viewport: 600));
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(250)]
-    [InlineData(400)]
+    [InlineData(1200)]
     public void A_first_page_that_does_not_fill_the_viewport_loads_even_when_scrolled(double scrollable)
     {
         // Content hardly scrolls: the offset can be anything within it, the page must still be filled.
@@ -127,9 +242,20 @@ public class ChatScrollPolicyTests
     }
 
     [Fact]
+    public void The_fill_test_uses_the_same_threshold_as_the_top_test()
+    {
+        // Viewport 1000 -> threshold 1500: content that scrolls 1500 still counts as not filling.
+        Assert.True(Should(offset: 1500, scrollable: 1500, viewport: 1000));
+        Assert.False(Should(offset: 1500.1, scrollable: 1500.1, viewport: 1000));
+        // Viewport 600 -> threshold 1200.
+        Assert.True(Should(offset: 1200, scrollable: 1200, viewport: 600));
+        Assert.False(Should(offset: 1200.1, scrollable: 1200.1, viewport: 600));
+    }
+
+    [Fact]
     public void Content_that_scrolls_just_over_the_threshold_and_is_read_far_down_does_not_load()
     {
-        Assert.False(Should(offset: 450, scrollable: 450.1));
+        Assert.False(Should(offset: 1300, scrollable: 1300.1));
     }
 
     [Fact]
@@ -180,14 +306,6 @@ public class ChatScrollPolicyTests
     public void Negative_offsets_and_heights_count_as_the_top(double offset, double scrollable)
     {
         Assert.True(Should(offset: offset, scrollable: scrollable));
-    }
-
-    [Fact]
-    public void A_custom_threshold_is_used()
-    {
-        Assert.True(ChatScrollPolicy.ShouldLoadOlder(true, 900, 20000, 600, true, false, 0, thresholdDips: 1000));
-        Assert.False(ChatScrollPolicy.ShouldLoadOlder(true, 150, 20000, 600, true, false, 0, thresholdDips: 100));
-        Assert.True(ChatScrollPolicy.ShouldLoadOlder(true, 0, 20000, 600, true, false, 0, thresholdDips: 0));
     }
 
     [Theory]
