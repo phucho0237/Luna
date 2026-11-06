@@ -92,6 +92,26 @@ public sealed class SqliteMessageStore : IMessageStore, IContactStore
         LIMIT $limit
         """;
 
+    // The same two queries without the raw_json column, for views that only show text (it is never read from the file).
+    private const string PageNoRawSql = """
+        SELECT id, thread_type, thread_id, msg_id, cli_msg_id, ts, is_self, uid_from, id_to, display_name, msg_type, text, recalled
+        FROM messages
+        WHERE thread_type = $tt AND thread_id = $tid
+          AND ($all = 1 OR recalled = 0)
+        ORDER BY ts DESC, id DESC
+        LIMIT $limit
+        """;
+
+    private const string PageAfterNoRawSql = """
+        SELECT id, thread_type, thread_id, msg_id, cli_msg_id, ts, is_self, uid_from, id_to, display_name, msg_type, text, recalled
+        FROM messages
+        WHERE thread_type = $tt AND thread_id = $tid
+          AND ($all = 1 OR recalled = 0)
+          AND (ts, id) < ($cts, $cid)
+        ORDER BY ts DESC, id DESC
+        LIMIT $limit
+        """;
+
     private const string ConversationsSql = """
         SELECT thread_type, thread_id, MAX(ts), COUNT(*)
         FROM messages
@@ -355,6 +375,7 @@ public sealed class SqliteMessageStore : IMessageStore, IContactStore
         MessageCursor? before,
         int limit,
         bool includeRecalled = false,
+        bool includeRaw = true,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(threadId);
@@ -370,7 +391,7 @@ public sealed class SqliteMessageStore : IMessageStore, IContactStore
                 {
                     ThrowIfDisposed();
                     cancellationToken.ThrowIfCancellationRequested();
-                    return ReadPage(threadType, threadId, before, limit, includeRecalled);
+                    return ReadPage(threadType, threadId, before, limit, includeRecalled, includeRaw);
                 },
                 cancellationToken).ConfigureAwait(false);
         }
@@ -380,10 +401,17 @@ public sealed class SqliteMessageStore : IMessageStore, IContactStore
         }
     }
 
-    private List<StoredMessage> ReadPage(ThreadType threadType, string threadId, MessageCursor? before, int limit, bool includeRecalled)
+    private List<StoredMessage> ReadPage(
+        ThreadType threadType, string threadId, MessageCursor? before, int limit, bool includeRecalled, bool includeRaw)
     {
         using SqliteCommand command = _connection.CreateCommand();
-        command.CommandText = before is null ? PageSql : PageAfterSql;
+        command.CommandText = (before is null, includeRaw) switch
+        {
+            (true, true) => PageSql,
+            (false, true) => PageAfterSql,
+            (true, false) => PageNoRawSql,
+            (false, false) => PageAfterNoRawSql,
+        };
         command.Parameters.Add("$tt", SqliteType.Integer).Value = (int)threadType;
         command.Parameters.Add("$tid", SqliteType.Text).Value = threadId;
         command.Parameters.Add("$all", SqliteType.Integer).Value = includeRecalled ? 1 : 0;
@@ -413,7 +441,7 @@ public sealed class SqliteMessageStore : IMessageStore, IContactStore
                 reader.GetString(10),
                 reader.IsDBNull(11) ? null : reader.GetString(11),
                 reader.GetInt32(12) != 0,
-                reader.GetString(13)));
+                includeRaw ? reader.GetString(13) : string.Empty));
         }
 
         return page;

@@ -76,11 +76,11 @@ public class SqliteMessageStoreQueryTests
         Assert.Equal(count, result.Inserted);
     }
 
-    // Name of the private SQL constant that holds the page query with a cursor.
-    private const string CursorSqlConstant = "PageAfterSql";
-
-    [Fact]
-    public async Task The_cursor_page_query_seeks_on_the_thread_index_with_a_range_on_ts_and_needs_no_sort()
+    // Names of the private SQL constants that hold the page query with a cursor (with and without the raw column).
+    [Theory]
+    [InlineData("PageAfterSql")]
+    [InlineData("PageAfterNoRawSql")]
+    public async Task The_cursor_page_query_seeks_on_the_thread_index_with_a_range_on_ts_and_needs_no_sort(string sqlConstant)
     {
         using var folder = new TempFolder();
         string path = Path.Combine(folder.Path, "history.db");
@@ -90,7 +90,7 @@ public class SqliteMessageStoreQueryTests
         }
 
         string sql = (string)typeof(SqliteMessageStore)
-            .GetField(CursorSqlConstant, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+            .GetField(sqlConstant, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
             .GetRawConstantValue()!;
 
         var details = new List<string>();
@@ -283,6 +283,63 @@ public class SqliteMessageStoreQueryTests
         {
             Assert.DoesNotContain(FakeMessages.FakeText, field ?? string.Empty, StringComparison.Ordinal);
         }
+    }
+
+    // ---- includeRaw -----------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Without_raw_the_json_is_empty_and_every_other_field_is_the_same()
+    {
+        using SqliteMessageStore store = NewMemoryStore();
+        await store.SaveAsync(Enumerable.Range(0, 3).Select(i => Msg(i, BaseTs + i)).ToArray());
+
+        IReadOnlyList<StoredMessage> withRaw = await store.GetPageAsync(ThreadType.User, FakeThread, null, 10);
+        IReadOnlyList<StoredMessage> withoutRaw = await store.GetPageAsync(ThreadType.User, FakeThread, null, 10, includeRaw: false);
+
+        Assert.Equal(3, withoutRaw.Count);
+        Assert.All(withRaw, m => Assert.NotEqual(string.Empty, m.RawJson));
+        Assert.All(withoutRaw, m => Assert.Equal(string.Empty, m.RawJson));
+        Assert.Equal(withRaw.Select(m => m with { RawJson = string.Empty }), withoutRaw);
+    }
+
+    [Fact]
+    public async Task Without_raw_the_cursor_variant_pages_the_same_rows_with_an_empty_json()
+    {
+        using SqliteMessageStore store = NewMemoryStore();
+        await store.SaveAsync(Enumerable.Range(0, 5).Select(i => Msg(i, BaseTs + i)).ToArray());
+
+        IReadOnlyList<StoredMessage> first = await store.GetPageAsync(ThreadType.User, FakeThread, null, 2, includeRaw: false);
+        IReadOnlyList<StoredMessage> second = await store.GetPageAsync(
+            ThreadType.User, FakeThread, first[^1].ToCursor(), 2, includeRaw: false);
+
+        Assert.Equal(["50004", "50003"], first.Select(m => m.MsgId));
+        Assert.Equal(["50002", "50001"], second.Select(m => m.MsgId));
+        Assert.All(first.Concat(second), m => Assert.Equal(string.Empty, m.RawJson));
+    }
+
+    [Theory]
+    [InlineData(true, "{}")]
+    [InlineData(false, "")]
+    public async Task Recalled_rows_come_back_with_no_text_and_the_raw_json_the_flag_asks_for(bool includeRaw, string expectedRaw)
+    {
+        using SqliteMessageStore store = NewMemoryStore();
+        await store.SaveAsync(
+        [
+            FakeMessages.Text(ThreadType.User, FakeThread, "5001", "6001", "1700000000001"),
+            FakeMessages.Text(ThreadType.User, FakeThread, "5002", "6002", "1700000000002"),
+        ]);
+        await store.SaveAsync([FakeMessages.Undo(ThreadType.User, FakeThread, "5002", "6002")]);
+
+        IReadOnlyList<StoredMessage> all = await store.GetPageAsync(
+            ThreadType.User, FakeThread, null, 10, includeRecalled: true, includeRaw: includeRaw);
+
+        Assert.Equal(["5002", "5001"], all.Select(m => m.MsgId));
+        Assert.True(all[0].Recalled);
+        Assert.Null(all[0].Text);
+        Assert.Equal(expectedRaw, all[0].RawJson);
+        Assert.False(all[1].Recalled);
+        Assert.Equal(FakeMessages.FakeText, all[1].Text);
+        Assert.Equal(includeRaw, all[1].RawJson.Length > 0);
     }
 
     [Fact]

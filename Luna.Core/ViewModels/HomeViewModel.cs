@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Luna.Core.Chat;
 using Luna.Core.Friends;
 using Luna.Core.Realtime;
 
@@ -32,14 +33,17 @@ public sealed partial class HomeViewModel : ObservableObject, IDisposable
         ConversationListViewModel conversations,
         FriendDirectory friends,
         LiveSyncService liveSync,
+        ChatViewModel chat,
         IReadOnlyList<IDisposable>? ownedResources = null)
     {
         ArgumentNullException.ThrowIfNull(conversations);
         ArgumentNullException.ThrowIfNull(friends);
         ArgumentNullException.ThrowIfNull(liveSync);
+        ArgumentNullException.ThrowIfNull(chat);
         Conversations = conversations;
         Friends = friends;
         LiveSync = liveSync;
+        Chat = chat;
         _ownedResources = ownedResources is null ? [] : [.. ownedResources.Where(r => r is not null)];
         StartCommand = new AsyncRelayCommand(() => StartAsync());
         RefreshFriendsCommand = new AsyncRelayCommand(RefreshFriendsAsync);
@@ -52,6 +56,37 @@ public sealed partial class HomeViewModel : ObservableObject, IDisposable
     public FriendDirectory Friends { get; }
 
     public LiveSyncService LiveSync { get; }
+
+    /// <summary>The messages of the selected conversation. Owned by this page: <see cref="Dispose"/> disposes it.</summary>
+    public ChatViewModel Chat { get; }
+
+    /// <summary>
+    /// Opens <paramref name="item"/> in the chat pane, or closes the chat pane for null. Opening the conversation that is
+    /// already open does nothing. Never throws; does nothing after dispose.
+    /// </summary>
+    public async Task SelectConversationAsync(ConversationItem? item, CancellationToken cancellationToken = default)
+    {
+        if (Volatile.Read(ref _disposed) == 1)
+        {
+            return;
+        }
+
+        try
+        {
+            if (item is null)
+            {
+                Chat.Close();
+                return;
+            }
+
+            using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
+            await Chat.OpenAsync(item, linked.Token).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // ChatViewModel handles storage failures itself; anything unexpected must not surface from a selection.
+        }
+    }
 
     /// <summary>Starts the page (see the class summary); ignored after the first run and after dispose.</summary>
     public IAsyncRelayCommand StartCommand { get; }
@@ -143,6 +178,7 @@ public sealed partial class HomeViewModel : ObservableObject, IDisposable
         LiveSync.MessagesStored -= OnMessagesStored;
         _cts.Cancel();
         LiveSync.Dispose();
+        Chat.Dispose();
 
         foreach (IDisposable resource in _ownedResources)
         {
@@ -188,6 +224,9 @@ public sealed partial class HomeViewModel : ObservableObject, IDisposable
             while (Volatile.Read(ref _disposed) == 0 && Interlocked.Exchange(ref _dirty, 0) == 1)
             {
                 await Conversations.RefreshAsync(_cts.Token).ConfigureAwait(false);
+
+                // The open conversation reads the same stored batch; it does nothing when no conversation is open.
+                await Chat.RefreshLatestAsync(_cts.Token).ConfigureAwait(false);
             }
         }
         catch (Exception)

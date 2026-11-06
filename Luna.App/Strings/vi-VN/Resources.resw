@@ -206,4 +206,68 @@
   <data name="HomeConnectionDot.AutomationProperties.Name" xml:space="preserve">
     <value>Trạng thái kết nối</value>
   </data>
+
+  <!-- Chat: what a message without text is, shown in italics in place of the text -->
+  <data name="Chat_Kind_Recalled" xml:space="preserve">
+    <value>Tin nhắn đã được thu hồi</value>
+  </data>
+  <data name="Chat_Kind_Sticker" xml:space="preserve">
+    <value>Nhãn dán</value>
+  </data>
+  <data name="Chat_Kind_Image" xml:space="preserve">
+    <value>Hình ảnh</value>
+  </data>
+  <data name="Chat_Kind_File" xml:space="preserve">
+    <value>Tệp đính kèm</value>
+  </data>
+  <data name="Chat_Kind_Other" xml:space="preserve">
+    <value>Tin nhắn chưa hỗ trợ hiển thị</value>
+  </data>
+
+  <!-- Chat: the state line of the pane -->
+  <data name="Chat_State_Idle" xml:space="preserve">
+    <value>Chọn một cuộc trò chuyện để xem tin nhắn.</value>
+  </data>
+  <data name="Chat_State_Loading" xml:space="preserve">
+    <value>Đang tải tin nhắn...</value>
+  </data>
+  <data name="Chat_State_Loaded" xml:space="preserve">
+    <value>Đã tải tin nhắn.</value>
+  </data>
+  <data name="Chat_State_Empty" xml:space="preserve">
+    <value>Chưa có tin nhắn nào được lưu. Chỉ hiển thị các tin nhắn nhận được khi ứng dụng đang chạy.</value>
+  </data>
+  <data name="Chat_State_Error" xml:space="preserve">
+    <value>Không đọc được tin nhắn trên máy này.</value>
+  </data>
+
+  <!-- Chat: sender labels; {0} = the last 4 characters of the sender id -->
+  <data name="Chat_Sender_Unknown" xml:space="preserve">
+    <value>Thành viên ...{0}</value>
+  </data>
+  <data name="Chat_Sender_Self" xml:space="preserve">
+    <value>Bạn</value>
+  </data>
+  <data name="Chat_Header_Subtitle" xml:space="preserve">
+    <value>Tin nhắn đã lưu trên máy này</value>
+  </data>
+
+  <!-- Chat: the line above the oldest message. Loading while an older page is read; the start line when nothing older is stored. -->
+  <data name="Chat_LoadingOlder" xml:space="preserve">
+    <value>Đang tải tin nhắn cũ hơn...</value>
+  </data>
+  <data name="Chat_StartOfStored" xml:space="preserve">
+    <value>Đây là tin nhắn cũ nhất đã lưu trên máy này</value>
+  </data>
+
+  <!-- Chat view: static texts bound with x:Uid -->
+  <data name="ChatLoadingOlderRing.AutomationProperties.Name" xml:space="preserve">
+    <value>Đang tải tin nhắn cũ hơn</value>
+  </data>
+  <data name="ChatMessageList.AutomationProperties.Name" xml:space="preserve">
+    <value>Danh sách tin nhắn</value>
+  </data>
+  <data name="ChatHeader.AutomationProperties.Name" xml:space="preserve">
+    <value>Tiêu đề cuộc trò chuyện</value>
+  </data>
 </root>

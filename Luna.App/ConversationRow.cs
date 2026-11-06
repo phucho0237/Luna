@@ -16,6 +16,7 @@ public sealed class ConversationRow
     public ConversationRow(ConversationItem item, DateTimeOffset nowLocal)
     {
         ArgumentNullException.ThrowIfNull(item);
+        Item = item;
         ThreadType = item.ThreadType;
         ThreadId = item.ThreadId;
         Key = KeyOf(item.ThreadType, item.ThreadId);
@@ -23,9 +24,12 @@ public sealed class ConversationRow
         TimeText = ChatTimeFormat.Format(item.LastTimestampMs, nowLocal);
     }
 
+    /// <summary>The conversation this row presents; passed to the chat pane when the row is chosen.</summary>
+    public ConversationItem Item { get; }
+
     public ThreadType ThreadType { get; }
 
-    /// <summary>The thread id; kept for T7c, never shown.</summary>
+    /// <summary>The thread id; used to open the conversation, never shown.</summary>
     public string ThreadId { get; }
 
     /// <summary>The identity of the conversation: thread type plus thread id.</summary>

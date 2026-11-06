@@ -23,6 +23,7 @@ pwsh -NoProfile -File scripts\check.ps1                         # tests + build,
 dotnet test .\Luna.Protocol.Tests\Luna.Protocol.Tests.csproj    # current count: run /check
 dotnet test .\Luna.Core.Tests\Luna.Core.Tests.csproj            # current count: run /check
 dotnet run --project .\Luna.Playground -- --shape               # touches the live server, run by a human only (also has --events; --friends-list and --send-cloud send real requests)
+dotnet run --project .\Luna.Playground -- --seed-history C:\temp\fake.db 20000   # OFFLINE (no server, no session): fake history, writes only to a file outside %LOCALAPPDATA%\Luna
 ```
 
 Do not run `dotnet test` at the solution root (the WinUI project needs Visual Studio, Debug | x64). `Luna.App` is built and run in Visual Studio with F5. The test count may only go up, never down.
