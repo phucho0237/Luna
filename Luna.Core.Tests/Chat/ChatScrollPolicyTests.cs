@@ -11,14 +11,84 @@ public class ChatScrollPolicyTests
         double viewport = 600,
         bool positioned = true,
         bool canLoad = true,
-        bool loading = false) =>
-        ChatScrollPolicy.ShouldLoadOlder(positioned, offset, scrollable, viewport, canLoad, loading);
+        bool loading = false,
+        int chain = 0) =>
+        ChatScrollPolicy.ShouldLoadOlder(positioned, offset, scrollable, viewport, canLoad, loading, chain);
 
     [Fact]
     public void Constants_are_the_agreed_values()
     {
         Assert.Equal(400, ChatScrollPolicy.LoadThresholdDips);
         Assert.Equal(24, ChatScrollPolicy.BottomToleranceDips);
+        Assert.Equal(2, ChatScrollPolicy.MaxChainWhenReading);
+        Assert.Equal(12, ChatScrollPolicy.MaxChainWhenFilling);
+    }
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(2, false)]
+    [InlineData(3, false)]
+    [InlineData(1000, false)]
+    public void A_filled_viewport_stops_after_the_reading_chain_cap(int chain, bool expected)
+    {
+        // Far above the threshold of scrollable height: the viewport is filled, the user is near the top.
+        Assert.Equal(expected, Should(offset: 10, scrollable: 20000, chain: chain));
+    }
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(2, true)]
+    [InlineData(11, true)]
+    [InlineData(12, false)]
+    [InlineData(13, false)]
+    [InlineData(int.MaxValue, false)]
+    public void Content_that_does_not_fill_the_viewport_stops_after_the_filling_chain_cap(int chain, bool expected)
+    {
+        Assert.Equal(expected, Should(offset: 0, scrollable: 0, chain: chain));
+        Assert.Equal(expected, Should(offset: 200, scrollable: 400, chain: chain));
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(-100)]
+    [InlineData(int.MinValue)]
+    public void A_negative_chain_counts_as_zero(int chain)
+    {
+        Assert.True(Should(offset: 10, scrollable: 20000, chain: chain));
+        Assert.True(Should(offset: 0, scrollable: 0, chain: chain));
+        Assert.False(Should(offset: 5000, scrollable: 20000, chain: chain));
+    }
+
+    [Fact]
+    public void The_caps_do_not_open_other_branches()
+    {
+        // At the cap nothing loads; below it the other conditions still decide.
+        Assert.False(Should(offset: 5000, scrollable: 20000, chain: 0));
+        Assert.False(Should(offset: 0, scrollable: 0, chain: 0, canLoad: false));
+        Assert.False(Should(offset: 0, scrollable: 0, chain: 0, loading: true));
+        Assert.False(Should(offset: 0, scrollable: 0, chain: 0, positioned: false));
+        Assert.False(Should(offset: 0, scrollable: 0, chain: 0, viewport: 0));
+    }
+
+    [Theory]
+    [InlineData(0, 100, false, true)]
+    [InlineData(100, 0, false, true)]
+    [InlineData(100, 100.5, false, true)]
+    [InlineData(-5, 5, false, true)]
+    [InlineData(100, 100, false, false)]
+    [InlineData(0, 100, true, false)]
+    [InlineData(100, 0, true, false)]
+    [InlineData(double.NaN, 100, false, false)]
+    [InlineData(100, double.NaN, false, false)]
+    [InlineData(double.NaN, double.NaN, false, false)]
+    public void A_user_scroll_is_a_real_offset_change_with_nothing_automatic_running(
+        double previous,
+        double current,
+        bool automaticInFlight,
+        bool expected)
+    {
+        Assert.Equal(expected, ChatScrollPolicy.IsUserScroll(previous, current, automaticInFlight));
     }
 
     [Fact]
@@ -115,9 +185,9 @@ public class ChatScrollPolicyTests
     [Fact]
     public void A_custom_threshold_is_used()
     {
-        Assert.True(ChatScrollPolicy.ShouldLoadOlder(true, 900, 20000, 600, true, false, thresholdDips: 1000));
-        Assert.False(ChatScrollPolicy.ShouldLoadOlder(true, 150, 20000, 600, true, false, thresholdDips: 100));
-        Assert.True(ChatScrollPolicy.ShouldLoadOlder(true, 0, 20000, 600, true, false, thresholdDips: 0));
+        Assert.True(ChatScrollPolicy.ShouldLoadOlder(true, 900, 20000, 600, true, false, 0, thresholdDips: 1000));
+        Assert.False(ChatScrollPolicy.ShouldLoadOlder(true, 150, 20000, 600, true, false, 0, thresholdDips: 100));
+        Assert.True(ChatScrollPolicy.ShouldLoadOlder(true, 0, 20000, 600, true, false, 0, thresholdDips: 0));
     }
 
     [Theory]
