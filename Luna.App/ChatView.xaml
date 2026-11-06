@@ -146,7 +146,9 @@
                     <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                         <Setter Property="MinHeight" Value="0" />
-                        <Setter Property="Padding" Value="0" />
+                        <!-- Left 0 as before; right 20 so a right-aligned bubble never sits under the overlay scrollbar. The
+                             bubbles size to their content (star columns, no fixed width) and the text wraps. -->
+                        <Setter Property="Padding" Value="0,0,20,0" />
                     </Style>
                 </ListView.ItemContainerStyle>
             </ListView>
