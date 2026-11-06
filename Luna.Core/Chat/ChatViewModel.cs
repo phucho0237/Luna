@@ -31,7 +31,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     private readonly int _pageSize;
     private readonly CancellationTokenSource _cts = new();
 
-    // Everything below is guarded by _gate. The mirror fields (_oldest, _canLoadOlder) are written in the same UI step that
+    // Everything below is guarded by _gate. The mirror fields (_cursor, _canLoadOlder) are written in the same UI step that
     // edits Items, so a background operation never reads a state the view has not applied.
     private readonly object _gate = new();
     private int _version;
@@ -40,8 +40,25 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     private ConversationItem? _conversation;
     private bool _openFailed;
     private bool _disposed;
-    private MessageKey? _oldest;
     private bool _canLoadOlder;
+
+    // The key the next older read starts before. It moves when a page is FETCHED (not when it is shown), so a second page
+    // can be read while the first one still waits in _pending. _exhausted is set at once when a short page comes back, while
+    // CanLoadOlder only changes when the pages are shown. _holding and _pending belong to the hold (see HoldOlderInserts).
+    private MessageKey? _cursor;
+    private bool _exhausted;
+    private bool _holding;
+    private readonly List<PendingOlder> _pending = [];
+
+    // A class, not a record: a record would print the message items in its ToString.
+    private sealed class PendingOlder(List<MessageItem> items, bool full)
+    {
+        public List<MessageItem> Items { get; } = items;
+
+        public bool Full { get; } = full;
+
+        public override string ToString() => nameof(PendingOlder);
+    }
 
     // UI-side mirrors, written only by UI steps: the last value of IsLoadingOlder (read by Dispose) and of ReachedStart.
     private bool _loadingOlderShown;
@@ -98,6 +115,79 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     /// <summary>Never prints messages, names or ids.</summary>
     public override string ToString() => nameof(ChatViewModel);
 
+    /// <summary>The page size of every older read while inserts are held (fixed, no adaptive growth).</summary>
+    public const int HeldPageSize = 200;
+
+    /// <summary>How many fetched older pages may wait for <see cref="ReleaseOlderInserts"/>; more are not fetched.</summary>
+    public const int MaxPendingPages = 2;
+
+    /// <summary>True between <see cref="HoldOlderInserts"/> and <see cref="ReleaseOlderInserts"/>.</summary>
+    public bool IsHoldingInserts
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _holding;
+            }
+        }
+    }
+
+    /// <summary>How many fetched older pages wait to be inserted.</summary>
+    public int PendingOlderPages
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _pending.Count;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Call while the user holds the pointer on the list or its scrollbar: older pages are still read, but kept aside (at
+    /// most <see cref="MaxPendingPages"/> of <see cref="HeldPageSize"/> rows) instead of being inserted, so the scroll extent
+    /// does not change under the user's hand. Safe to call twice. Ended by <see cref="ReleaseOlderInserts"/>, by closing or
+    /// opening another conversation, by a reset of the newest page and by <see cref="Dispose"/>.
+    /// </summary>
+    public void HoldOlderInserts()
+    {
+        lock (_gate)
+        {
+            if (!_disposed)
+            {
+                _holding = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Ends the hold and inserts the pages that were kept aside, in order, in one dispatcher step. Does nothing more when
+    /// nothing is waiting. Safe to call twice, and when no hold is active.
+    /// </summary>
+    public void ReleaseOlderInserts()
+    {
+        PendingOlder[] pages;
+        int version;
+        int epoch;
+        lock (_gate)
+        {
+            _holding = false;
+            if (_disposed || _pending.Count == 0)
+            {
+                return;
+            }
+
+            pages = [.. _pending];
+            _pending.Clear();
+            version = _version;
+            epoch = _epoch;
+        }
+
+        Post(version, () => ApplyPending(epoch, pages));
+    }
+
     /// <summary>
     /// Opens a conversation: the previous one is cleared and the newest page of this one is read. Opening the conversation
     /// that is already open (same thread type and id) does nothing, unless its first load failed, which retries it. Never
@@ -117,8 +207,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
 
             _conversation = item;
             _openFailed = false;
-            _oldest = null;
-            _canLoadOlder = false;
+            ResetOlderState();
             version = ++_version;
         }
 
@@ -147,8 +236,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
 
             _conversation = null;
             _openFailed = false;
-            _oldest = null;
-            _canLoadOlder = false;
+            ResetOlderState();
             version = ++_version;
         }
 
@@ -237,9 +325,16 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         int epoch;
         lock (_gate)
         {
-            if (_disposed || _conversation is null || !_canLoadOlder || _oldest is not { } known || _olderVersion == _version)
+            // A call that is refused here changes nothing and posts nothing (it is not a load, so it must not count as one).
+            if (_disposed || _conversation is null || !_canLoadOlder || _exhausted || _cursor is not { } known
+                || _olderVersion == _version || _pending.Count >= MaxPendingPages)
             {
                 return;
+            }
+
+            if (_holding)
+            {
+                size = HeldPageSize;
             }
 
             item = _conversation;
@@ -267,6 +362,23 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
                 .ConfigureAwait(false);
             List<MessageItem> older = await ToItemsAsync(item.ThreadType, page, token).ConfigureAwait(false);
             bool full = page.Count >= size;
+            lock (_gate)
+            {
+                // Moves at fetch time. Only while the conversation and the list are still the ones the read began for.
+                if (version == _version && epoch == _epoch)
+                {
+                    if (older.Count > 0)
+                    {
+                        _cursor = older[0].Key;
+                    }
+
+                    if (!full)
+                    {
+                        _exhausted = true;
+                    }
+                }
+            }
+
             posted = true;
             Post(version, () => ApplyOlder(version, epoch, older, full));
         }
@@ -306,6 +418,8 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
 
             _disposed = true;
             _version++;
+            _holding = false;
+            _pending.Clear();
             resetFlag = _loadingOlderShown;
         }
 
@@ -432,9 +546,12 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         if (plan.IsReset)
         {
             // A gap that cannot be merged (more new messages than one page): start again from this page, in the same collection.
+            // Pages that were kept aside belong to the old list, so they go too (and so does the hold).
             lock (_gate)
             {
                 _epoch++;
+                _holding = false;
+                _pending.Clear();
             }
 
             Items.Clear();
@@ -469,14 +586,16 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
             _openFailed = false;
         }
 
-        SyncMirror();
+        SyncMirror(reset: wasEmpty || plan.IsReset);
         UpdateReachedStart();
     }
 
-    // UI step: inserts an older page (ascending) before the first shown message.
+    // UI step: the older page has been read. It is shown at once, unless the user holds the pointer: then it is kept aside
+    // (the loading flag ends when it is queued) and ReleaseOlderInserts shows it.
     private void ApplyOlder(int version, int epoch, List<MessageItem> older, bool full)
     {
         bool stale;
+        bool queued = false;
         lock (_gate)
         {
             if (_olderVersion == version)
@@ -485,14 +604,55 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
             }
 
             stale = epoch != _epoch;
+            if (!stale && _holding)
+            {
+                _pending.Add(new PendingOlder(older, full));
+                queued = true;
+            }
         }
 
-        if (stale)
+        if (stale || queued)
         {
             SetLoadingOlder(false);
             return;
         }
 
+        InsertOlder(older);
+        CanLoadOlder = full;
+        SyncMirror(reset: false);
+        UpdateReachedStart();
+
+        // Last, so a listener that reacts to the flag already sees the inserted items and the new CanLoadOlder.
+        SetLoadingOlder(false);
+    }
+
+    // UI step of ReleaseOlderInserts: the kept pages, newest first, each inserted at the start, so the oldest ends on top.
+    private void ApplyPending(int epoch, PendingOlder[] pages)
+    {
+        bool stale;
+        lock (_gate)
+        {
+            stale = epoch != _epoch;
+        }
+
+        if (stale)
+        {
+            return;
+        }
+
+        foreach (PendingOlder page in pages)
+        {
+            InsertOlder(page.Items);
+        }
+
+        CanLoadOlder = pages[^1].Full;
+        SyncMirror(reset: false);
+        UpdateReachedStart();
+    }
+
+    // Inserts an older page (ascending) before the first shown message; rows that are not older than it are skipped.
+    private void InsertOlder(List<MessageItem> older)
+    {
         MessageKey? first = Items.Count > 0 ? Items[0].Key : null;
         int at = 0;
         foreach (MessageItem item in older)
@@ -504,20 +664,39 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
 
             Items.Insert(at++, item);
         }
-
-        CanLoadOlder = full;
-        SyncMirror();
-        UpdateReachedStart();
-
-        // Last, so a listener that reacts to the flag already sees the inserted items and the new CanLoadOlder.
-        SetLoadingOlder(false);
     }
 
-    private void SyncMirror()
+    // Called with _gate held: the older-page state of a conversation that was just opened or closed.
+    private void ResetOlderState()
+    {
+        _cursor = null;
+        _canLoadOlder = false;
+        _exhausted = false;
+        _holding = false;
+        _pending.Clear();
+    }
+
+    // Writes the mirrors. After a reset (first rows, or the list was started again) the cursor is the first shown row and the
+    // page is fetchable again; otherwise it can only move older, because pages that were fetched but are still kept aside are
+    // older than the first shown row and a refresh of the newest page must not move the cursor back to a newer one.
+    private void SyncMirror(bool reset)
     {
         lock (_gate)
         {
-            _oldest = Items.Count > 0 ? Items[0].Key : null;
+            MessageKey? first = Items.Count > 0 ? Items[0].Key : null;
+            if (reset || _cursor is not { } current || first is not { } shown)
+            {
+                _cursor = first;
+                if (reset)
+                {
+                    _exhausted = false;
+                }
+            }
+            else if (shown < current)
+            {
+                _cursor = shown;
+            }
+
             _canLoadOlder = CanLoadOlder;
         }
     }

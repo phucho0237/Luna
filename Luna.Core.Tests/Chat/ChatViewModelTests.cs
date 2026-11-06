@@ -1199,6 +1199,317 @@ public sealed class ChatViewModelTests : IDisposable
         Assert.Contains(nameof(ChatViewModel.ReachedStart), raised);
     }
 
+    // ---- Held inserts (pointer held on the list or its scrollbar) -----------------------------------------------------
+
+    private static string[] Seq(int from, int to) => Expected([.. Enumerable.Range(from, to - from + 1)]);
+
+    private static void AssertStrictlyAscending(ChatViewModel vm)
+    {
+        for (int i = 1; i < vm.Items.Count; i++)
+        {
+            Assert.True(vm.Items[i - 1].Key < vm.Items[i].Key, "Items must stay strictly ascending (no duplicate, no disorder).");
+        }
+    }
+
+    // Messages 1..total, newest page of 50 shown (so Items = total-49..total).
+    private async Task<ChatViewModel> OpenLong(int total)
+    {
+        await SaveRange(ThreadA, 1, total);
+        ChatViewModel vm = Create(pageSize: 50);
+        await OpenAndShow(vm, Conv(ThreadA));
+        return vm;
+    }
+
+    private async Task LoadAndShow(ChatViewModel vm, int? size = null)
+    {
+        await vm.LoadOlderAsync(size).WaitAsync(Patience);
+        _ui.RunAll();
+    }
+
+    [Fact]
+    public async Task While_held_older_pages_are_fetched_but_queued_and_the_queue_is_bounded()
+    {
+        ChatViewModel vm = await OpenLong(1000);
+        vm.HoldOlderInserts();
+        Assert.True(vm.IsHoldingInserts);
+
+        await LoadAndShow(vm, 50);
+
+        Assert.Equal(Seq(951, 1000), Texts(vm));
+        Assert.Equal(1, vm.PendingOlderPages);
+        Assert.False(vm.IsLoadingOlder);
+        Assert.Equal(ChatViewModel.HeldPageSize, _store.Calls[1].Limit);
+
+        await LoadAndShow(vm);
+
+        Assert.Equal(Seq(951, 1000), Texts(vm));
+        Assert.Equal(ChatViewModel.MaxPendingPages, vm.PendingOlderPages);
+        Assert.Equal(3, _store.PageCalls);
+        Assert.True(vm.CanLoadOlder);
+
+        await LoadAndShow(vm);
+
+        Assert.Equal(3, _store.PageCalls);
+        Assert.Equal(Seq(951, 1000), Texts(vm));
+    }
+
+    [Fact]
+    public async Task A_refused_load_posts_nothing_and_does_not_toggle_the_loading_flag()
+    {
+        ChatViewModel vm = await OpenLong(1000);
+        vm.HoldOlderInserts();
+        await LoadAndShow(vm);
+        await LoadAndShow(vm);
+        Assert.Equal(ChatViewModel.MaxPendingPages, vm.PendingOlderPages);
+        var raised = new List<string?>();
+        vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        int calls = _store.PageCalls;
+
+        await vm.LoadOlderAsync().WaitAsync(Patience);
+
+        Assert.Equal(0, _ui.Pending);
+        Assert.Equal(calls, _store.PageCalls);
+        _ui.RunAll();
+        Assert.Empty(raised);
+        Assert.False(vm.IsLoadingOlder);
+    }
+
+    [Fact]
+    public async Task Release_applies_the_pages_in_order_and_the_next_fetch_continues_from_the_oldest_shown()
+    {
+        ChatViewModel vm = await OpenLong(1000);
+        vm.HoldOlderInserts();
+        await LoadAndShow(vm);
+        await LoadAndShow(vm);
+
+        vm.ReleaseOlderInserts();
+
+        Assert.False(vm.IsHoldingInserts);
+        Assert.Equal(0, vm.PendingOlderPages);
+        Assert.Equal(Seq(951, 1000), Texts(vm));
+        Assert.Equal(1, _ui.Pending);
+
+        _ui.RunAll();
+
+        Assert.Equal(Seq(551, 1000), Texts(vm));
+        AssertStrictlyAscending(vm);
+        MessageKey oldest = vm.Items[0].Key;
+
+        await LoadAndShow(vm, 50);
+
+        Assert.Equal(new MessageCursor(oldest.TimestampMs, oldest.Id), _store.Calls[3].Before);
+        Assert.Equal(50, _store.Calls[3].Limit);
+        Assert.Equal(Seq(501, 1000), Texts(vm));
+        AssertStrictlyAscending(vm);
+    }
+
+    [Fact]
+    public async Task Hold_and_release_are_idempotent_and_a_release_with_nothing_pending_does_nothing()
+    {
+        ChatViewModel vm = await OpenLong(200);
+        Assert.Equal(0, _ui.Pending);
+
+        vm.ReleaseOlderInserts();
+        vm.ReleaseOlderInserts();
+        Assert.Equal(0, _ui.Pending);
+        Assert.False(vm.IsHoldingInserts);
+
+        vm.HoldOlderInserts();
+        vm.HoldOlderInserts();
+        Assert.True(vm.IsHoldingInserts);
+        await LoadAndShow(vm);
+        Assert.Equal(1, vm.PendingOlderPages);
+
+        vm.ReleaseOlderInserts();
+        vm.ReleaseOlderInserts();
+        _ui.RunAll();
+
+        Assert.False(vm.IsHoldingInserts);
+        Assert.Equal(0, vm.PendingOlderPages);
+        Assert.Equal(Seq(1, 200), Texts(vm));
+
+        vm.ReleaseOlderInserts();
+        Assert.Equal(0, _ui.Pending);
+    }
+
+    [Fact]
+    public async Task Opening_another_conversation_drops_the_pending_pages_and_the_hold()
+    {
+        ChatViewModel vm = await OpenLong(1000);
+        await SaveRange(ThreadB, 2001, 2003);
+        vm.HoldOlderInserts();
+        await LoadAndShow(vm);
+        Assert.Equal(1, vm.PendingOlderPages);
+
+        await OpenAndShow(vm, Conv(ThreadB));
+        vm.ReleaseOlderInserts();
+        _ui.RunAll();
+
+        Assert.False(vm.IsHoldingInserts);
+        Assert.Equal(0, vm.PendingOlderPages);
+        Assert.Equal(Expected(2001, 2002, 2003), Texts(vm));
+    }
+
+    [Fact]
+    public async Task Close_and_Dispose_drop_the_pending_pages_and_the_hold()
+    {
+        ChatViewModel closed = await OpenLong(1000);
+        closed.HoldOlderInserts();
+        await LoadAndShow(closed);
+        Assert.Equal(1, closed.PendingOlderPages);
+
+        closed.Close();
+        _ui.RunAll();
+
+        Assert.False(closed.IsHoldingInserts);
+        Assert.Equal(0, closed.PendingOlderPages);
+        Assert.Empty(closed.Items);
+
+        ChatViewModel disposed = Create(pageSize: 50);
+        await OpenAndShow(disposed, Conv(ThreadA));
+        disposed.HoldOlderInserts();
+        await LoadAndShow(disposed);
+        Assert.Equal(1, disposed.PendingOlderPages);
+
+        disposed.Dispose();
+
+        Assert.False(disposed.IsHoldingInserts);
+        Assert.Equal(0, disposed.PendingOlderPages);
+    }
+
+    [Fact]
+    public async Task A_reset_of_the_newest_page_drops_the_pending_pages_and_the_hold()
+    {
+        ChatViewModel vm = await OpenLong(1000);
+        vm.HoldOlderInserts();
+        await LoadAndShow(vm);
+        Assert.Equal(1, vm.PendingOlderPages);
+        await SaveRange(ThreadA, 1001, 1100);
+
+        await RefreshAndShow(vm);
+
+        Assert.Equal(Seq(1051, 1100), Texts(vm));
+        Assert.Equal(0, vm.PendingOlderPages);
+        Assert.False(vm.IsHoldingInserts);
+        vm.ReleaseOlderInserts();
+        _ui.RunAll();
+        Assert.Equal(Seq(1051, 1100), Texts(vm));
+    }
+
+    [Fact]
+    public async Task A_short_page_while_held_stops_fetching_and_the_start_shows_only_after_release()
+    {
+        ChatViewModel vm = await OpenLong(230);
+        vm.HoldOlderInserts();
+
+        await LoadAndShow(vm);
+
+        Assert.Equal(1, vm.PendingOlderPages);
+        Assert.True(vm.CanLoadOlder);
+        Assert.False(vm.ReachedStart);
+        int calls = _store.PageCalls;
+
+        await LoadAndShow(vm);
+
+        Assert.Equal(calls, _store.PageCalls);
+        Assert.Equal(Seq(181, 230), Texts(vm));
+
+        vm.ReleaseOlderInserts();
+        _ui.RunAll();
+
+        Assert.Equal(Seq(1, 230), Texts(vm));
+        Assert.False(vm.CanLoadOlder);
+        Assert.True(vm.ReachedStart);
+        await LoadAndShow(vm);
+        Assert.Equal(calls, _store.PageCalls);
+    }
+
+    [Fact]
+    public async Task A_page_whose_fetch_began_before_the_hold_is_queued_when_it_arrives_after_the_hold_began()
+    {
+        ChatViewModel vm = await OpenLong(1000);
+        TaskCompletionSource gate = _store.GateNextPage();
+        Task older = vm.LoadOlderAsync(8);
+        await _store.WhenPageCalls(2).WaitAsync(Patience);
+
+        vm.HoldOlderInserts();
+        gate.SetResult();
+        await older.WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.Equal(8, _store.Calls[1].Limit);
+        Assert.Equal(Seq(951, 1000), Texts(vm));
+        Assert.Equal(1, vm.PendingOlderPages);
+        Assert.False(vm.IsLoadingOlder);
+
+        vm.ReleaseOlderInserts();
+        _ui.RunAll();
+
+        Assert.Equal(Seq(943, 1000), Texts(vm));
+        AssertStrictlyAscending(vm);
+    }
+
+    [Fact]
+    public async Task A_page_whose_fetch_began_while_held_is_applied_directly_above_the_released_pages_when_it_arrives_later()
+    {
+        ChatViewModel vm = await OpenLong(1000);
+        vm.HoldOlderInserts();
+        await LoadAndShow(vm);
+        TaskCompletionSource gate = _store.GateNextPage();
+        Task second = vm.LoadOlderAsync();
+        await _store.WhenPageCalls(3).WaitAsync(Patience);
+        _ui.RunAll();
+        Assert.True(vm.IsLoadingOlder);
+
+        vm.ReleaseOlderInserts();
+        _ui.RunAll();
+
+        Assert.Equal(Seq(751, 1000), Texts(vm));
+        Assert.False(vm.IsHoldingInserts);
+        gate.SetResult();
+        await second.WaitAsync(Patience);
+        _ui.RunAll();
+
+        Assert.Equal(Seq(551, 1000), Texts(vm));
+        AssertStrictlyAscending(vm);
+        Assert.False(vm.IsLoadingOlder);
+        MessageKey oldest = vm.Items[0].Key;
+
+        await LoadAndShow(vm, 50);
+
+        Assert.Equal(new MessageCursor(oldest.TimestampMs, oldest.Id), _store.Calls[3].Before);
+        Assert.Equal(Seq(501, 1000), Texts(vm));
+        AssertStrictlyAscending(vm);
+    }
+
+    [Fact]
+    public async Task A_refresh_during_the_hold_changes_only_the_tail_and_neither_the_cursor_nor_the_pending_pages()
+    {
+        ChatViewModel vm = await OpenLong(1000);
+        vm.HoldOlderInserts();
+        await LoadAndShow(vm);
+        Assert.Equal(1, vm.PendingOlderPages);
+        await SaveRange(ThreadA, 1001, 1003);
+
+        await RefreshAndShow(vm);
+
+        Assert.Equal(Seq(951, 1003), Texts(vm));
+        Assert.Equal(1, vm.PendingOlderPages);
+
+        await LoadAndShow(vm);
+
+        // The second page continues from the first QUEUED page (message 751), not from the oldest shown one (951).
+        // Calls: 0 = open, 1 = first held page, 2 = the refresh, 3 = the second held page.
+        Assert.Equal(75100, _store.Calls[3].Before!.TimestampMs);
+        Assert.Equal(2, vm.PendingOlderPages);
+
+        vm.ReleaseOlderInserts();
+        _ui.RunAll();
+
+        Assert.Equal(Seq(551, 1003), Texts(vm));
+        AssertStrictlyAscending(vm);
+    }
+
     // ---- Construction and hygiene ------------------------------------------------------------------------------------
 
     [Fact]
