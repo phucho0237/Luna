@@ -14,6 +14,8 @@ internal sealed class FakeWebSocketConnection : IWebSocketConnection
     private readonly List<byte[]> _sent = [];
     private readonly List<(WebSocketCloseStatus Status, string? Description)> _closes = [];
     private Memory<byte> _current;
+    private int _concurrentSends;
+    private int _maxConcurrentSends;
 
     /// <summary>Set to make ConnectAsync fail with this exception instead of opening.</summary>
     public Exception? ConnectFailure { get; init; }
@@ -29,6 +31,21 @@ internal sealed class FakeWebSocketConnection : IWebSocketConnection
     public IReadOnlyDictionary<string, string>? ConnectHeaders { get; private set; }
 
     public bool Disposed { get; private set; }
+
+    /// <summary>
+    /// When set, every SendAsync waits (with its token) until the task completes before recording the frame.
+    /// Lets a test hold one send in flight to see whether a second one overlaps it.
+    /// </summary>
+    public volatile TaskCompletionSource? SendGate;
+
+    /// <summary>Highest number of SendAsync calls that were running at the same time.</summary>
+    public int MaxConcurrentSends => Volatile.Read(ref _maxConcurrentSends);
+
+    /// <summary>One item per SendAsync call, added when the call starts (before the gate).</summary>
+    public AsyncQueue<int> SendStarted { get; } = new();
+
+    /// <summary>One item per frame that was completely sent, in order.</summary>
+    public AsyncQueue<byte[]> SentFrames { get; } = new();
 
     public IReadOnlyList<byte[]> Sent
     {
@@ -99,15 +116,37 @@ internal sealed class FakeWebSocketConnection : IWebSocketConnection
         return result;
     }
 
-    public ValueTask SendAsync(
+    public async ValueTask SendAsync(
         ReadOnlyMemory<byte> data, WebSocketMessageType messageType, bool endOfMessage, CancellationToken cancellationToken)
     {
-        lock (_sent)
+        int running = Interlocked.Increment(ref _concurrentSends);
+        int seenMax;
+        do
         {
-            _sent.Add(data.ToArray());
+            seenMax = Volatile.Read(ref _maxConcurrentSends);
         }
+        while (running > seenMax && Interlocked.CompareExchange(ref _maxConcurrentSends, running, seenMax) != seenMax);
 
-        return ValueTask.CompletedTask;
+        byte[] copy = data.ToArray();
+        SendStarted.Add(copy.Length);
+        try
+        {
+            if (SendGate is { } gate)
+            {
+                await gate.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            lock (_sent)
+            {
+                _sent.Add(copy);
+            }
+
+            SentFrames.Add(copy);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _concurrentSends);
+        }
     }
 
     public Task CloseOutputAsync(WebSocketCloseStatus status, string? description, CancellationToken cancellationToken)
