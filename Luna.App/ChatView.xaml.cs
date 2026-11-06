@@ -6,6 +6,7 @@ using Luna.Core.Chat;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 
 namespace Luna.App;
@@ -41,8 +42,18 @@ public sealed partial class ChatView : UserControl
     private bool _settling;
     private bool _followPending;
 
+    // True while a pointer is pressed on the list or its scrollbar (a held scrollbar thumb keeps the offset at the top, so the
+    // fuse needs the higher dragging cap). The handlers are added with handledEventsToo because the scrollbar marks its
+    // pointer events as handled.
+    private bool _pointerDown;
+    private bool _pointerHooked;
+    private readonly PointerEventHandler _onPointerPressed;
+    private readonly PointerEventHandler _onPointerEnded;
+
     public ChatView()
     {
+        _onPointerPressed = OnListPointerPressed;
+        _onPointerEnded = OnListPointerEnded;
         InitializeComponent();
         MessageList.ItemsSource = _rows;
         SubtitleText.Text = HomeText.Get("Chat_Header_Subtitle");
@@ -62,6 +73,7 @@ public sealed partial class ChatView : UserControl
         _wasLoading = chat.IsLoadingOlder;
         chat.PropertyChanged += OnChatPropertyChanged;
         chat.Items.CollectionChanged += OnItemsChanged;
+        HookPointer();
         if (IsLoaded)
         {
             HookScroller();
@@ -83,6 +95,8 @@ public sealed partial class ChatView : UserControl
         }
 
         UnhookScroller();
+        UnhookPointer();
+        _pointerDown = false;
         _rows.Clear();
         ResetPosition(pending: false);
         _autoLoadsSinceUserScroll = 0;
@@ -105,6 +119,7 @@ public sealed partial class ChatView : UserControl
         _rows.Clear();
         ResetPosition(pending: true);
         _autoLoadsSinceUserScroll = 0;
+        _pointerDown = false;
         _pageInserted = false;
         _lastOffset = 0;
     }
@@ -132,6 +147,52 @@ public sealed partial class ChatView : UserControl
         }
 
         HookScroller();
+        EvaluateLoadOlder();
+    }
+
+    // ---- pointer ----
+
+    private void HookPointer()
+    {
+        if (_pointerHooked)
+        {
+            return;
+        }
+
+        _pointerHooked = true;
+        MessageList.AddHandler(UIElement.PointerPressedEvent, _onPointerPressed, true);
+        MessageList.AddHandler(UIElement.PointerReleasedEvent, _onPointerEnded, true);
+        MessageList.AddHandler(UIElement.PointerCaptureLostEvent, _onPointerEnded, true);
+        MessageList.AddHandler(UIElement.PointerCanceledEvent, _onPointerEnded, true);
+    }
+
+    private void UnhookPointer()
+    {
+        if (!_pointerHooked)
+        {
+            return;
+        }
+
+        _pointerHooked = false;
+        MessageList.RemoveHandler(UIElement.PointerPressedEvent, _onPointerPressed);
+        MessageList.RemoveHandler(UIElement.PointerReleasedEvent, _onPointerEnded);
+        MessageList.RemoveHandler(UIElement.PointerCaptureLostEvent, _onPointerEnded);
+        MessageList.RemoveHandler(UIElement.PointerCanceledEvent, _onPointerEnded);
+    }
+
+    private void OnListPointerPressed(object sender, PointerRoutedEventArgs e) => _pointerDown = true;
+
+    // Release, lost capture and cancel all end the hold. The chain starts again from zero, and the view looks once more: a
+    // user who let go at the top gets the next page without having to scroll first.
+    private void OnListPointerEnded(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_pointerDown)
+        {
+            return;
+        }
+
+        _pointerDown = false;
+        _autoLoadsSinceUserScroll = 0;
         EvaluateLoadOlder();
     }
 
@@ -235,9 +296,11 @@ public sealed partial class ChatView : UserControl
                 scroller.ViewportHeight,
                 chat.CanLoadOlder,
                 chat.IsLoadingOlder,
-                _autoLoadsSinceUserScroll))
+                _autoLoadsSinceUserScroll,
+                _pointerDown))
         {
-            _ = chat.LoadOlderAsync();
+            // The page grows with each automatic load of the chain; a real scroll or a released pointer starts it over.
+            _ = chat.LoadOlderAsync(ChatScrollPolicy.NextPageSize(_autoLoadsSinceUserScroll));
         }
     }
 
