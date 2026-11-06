@@ -205,6 +205,17 @@ Shapes observed on the live server (T1b, data types only, no values) **[Live]**:
 - An object-valued `content` that has none of the keys `title/description/href/thumb/params` (and is not a sticker or undo) is kept as `UnknownContent` with `Raw` intact; it is not guessed to be an attachment.
 - Verified: a direct message sent by the account itself from another device gives `IsSelf = True` (it is not known whether `uidFrom` is `"0"` or the real uid). Not verified on the live server: voice messages, video, contact cards, location.
 
+### Old messages (T5b) **[Source]**
+
+**Not verified on the live server.** Everything here comes from zca-js 2.2.0 **[Source]**; the maintainer changes the marker to **[Live]** after running `Luna.Playground -- --history-probe`.
+
+- Request: a WebSocket frame version 1, cmd `510` (private chats) or `511` (groups), subCmd `1`, JSON body `{"first": true, "lastId": <message id string or null>, "preIds": []}`. `SocketClient.RequestOldMessages(HistoryScope, lastMessageId)` builds it; `lastId` is null for the first page, otherwise 1 to 20 digits.
+- Response: a frame cmd `510` or `511`, subCmd `1`; the decoded data has `msgs` (private) or `groupMsgs` (groups), shaped like the live messages above.
+- The request carries no thread id, so it seems to return a stream of recent messages of the whole account, paged by `lastId` (the id of the oldest message of the previous page).
+- Unknown until the probe runs: how far back the server keeps messages, the page size, whether `lastId` pages overlap or continue older, whether history messages use `uidFrom == "0"` or the real uid for the own account, and any rate limit. Treat these as open questions.
+- The probe (`HistoryProbeSummary`, `ProbePlan`) asks at most 3 pages per scope, 5 seconds apart, stops after 90 seconds or on any error, and runs at most once per 30 minutes. It prints counts, day ranges and field names only; it saves nothing.
+- Writes on the socket are serialized (one send at a time) and a queued request is dropped, never retried, when the connection drops.
+
 ## 8. Post-login API
 
 - Parameters are encrypted with `SessionCipher` using `zpw_enk` (Base64 of an AES-128 key, IV 0). Response: `data` is decrypted with the same key (URL-decode first).

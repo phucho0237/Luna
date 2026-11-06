@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Threading.Channels;
 using Luna.Core.Auth;
 using Luna.Core.Dev;
 using Luna.Core.Sessions;
@@ -129,6 +130,14 @@ if (args.Contains("--friends-list", StringComparer.OrdinalIgnoreCase))
         Console.WriteLine("Cancelled.");
     }
 
+    return;
+}
+
+// --history-probe mode: LIVE server, human only. Requests old messages (frames 510/511) a few times and prints only counts,
+// day ranges and shapes. Saves nothing; runs at most once every 30 minutes. See RunHistoryProbeAsync.
+if (args.Contains("--history-probe", StringComparer.OrdinalIgnoreCase))
+{
+    await RunHistoryProbeAsync(auth, throttleGuard, cts.Token);
     return;
 }
 
@@ -386,6 +395,293 @@ finally
     {
         File.Delete(qrPath);
     }
+}
+
+static void PrintHistoryProbeUsage()
+{
+    Console.WriteLine("--history-probe mode (LIVE server, human only):");
+    Console.WriteLine("  Close the Luna app and every web session first, and use a SECONDARY account.");
+    Console.WriteLine($"  Runs at most once per {ProbePlan.MinMinutesBetweenRuns} minutes. Requests at most {ProbePlan.MaxPagesPerScope} pages of old");
+    Console.WriteLine("  private messages, then the same for group messages, at least 5 seconds apart; stops after 90 seconds.");
+    Console.WriteLine("  Prints counts, day ranges and field names only: no message text, names, ids or exact times.");
+    Console.WriteLine("  Nothing is saved. Any error, disconnect or missing answer stops the probe.");
+}
+
+// Probe of the old-message frames (T5b). Prints only counts, day ranges, field names and the kind of any anomaly.
+// The order matters for account safety: guard check, restore the session, RecordCall BEFORE connecting, one socket,
+// typed requests only, no retry, no loop beyond ProbePlan.
+static async Task RunHistoryProbeAsync(AuthService auth, ApiThrottleGuard guard, CancellationToken ct)
+{
+    PrintHistoryProbeUsage();
+
+    if (guard.MinutesRemaining() is { } blockedMinutes)
+    {
+        Console.WriteLine($"In cooldown after a 429, about {blockedMinutes} minutes left. Not running.");
+        return;
+    }
+
+    if (guard.MinutesUntilAllowed(ProbePlan.GuardKey, TimeSpan.FromMinutes(ProbePlan.MinMinutesBetweenRuns)) is { } waitMinutes)
+    {
+        Console.WriteLine($"Blocked: about {waitMinutes} minutes left before the probe may run again.");
+        return;
+    }
+
+    var total = new Stopwatch();
+    string stop = "complete";
+    int requestsSent = 0;
+    int privatePages = 0;
+    int groupPages = 0;
+    int parsedTotal = 0;
+    try
+    {
+        AuthSession? session = await auth.RestoreAsync(ct);
+        if (session is null)
+        {
+            Console.WriteLine("No saved session. Run the normal mode (QR login) once first, then run --history-probe again.");
+            return;
+        }
+
+        guard.RecordCall(ProbePlan.GuardKey); // Recorded BEFORE connecting: an error midway still counts as a run.
+        total.Start();
+
+        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        runCts.CancelAfter(TimeSpan.FromSeconds(ProbePlan.MaxRunSeconds));
+        var connected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var anomaly = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var responses = Channel.CreateUnbounded<SocketEvent>();
+
+        // No trace action: the client prints nothing. The state detail (a free-text reason) is never printed either.
+        var client = new SocketClient(session.Context, session.Info.WebSocketUrls);
+        Task runTask = client.RunAsync(
+            onEvent: e =>
+            {
+                if (e.Cmd is 510 or 511 && e.SubCmd == 1)
+                {
+                    responses.Writer.TryWrite(e);
+                }
+            },
+            onState: s =>
+            {
+                switch (s.State)
+                {
+                    case SocketState.Connected:
+                        connected.TrySetResult();
+                        break;
+                    case SocketState.DuplicateConnection:
+                        anomaly.TrySetResult("duplicate-connection");
+                        break;
+                    case SocketState.Disconnected:
+                        anomaly.TrySetResult(Volatile.Read(ref requestsSent) > 0 ? "disconnect-after-request" : "disconnect-before-request");
+                        break;
+                }
+            },
+            cancellationToken: runCts.Token);
+
+        try
+        {
+            stop = await DriveAsync();
+        }
+        finally
+        {
+            await runCts.CancelAsync();
+            try
+            {
+                await runTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // Stopped on purpose.
+            }
+        }
+
+        string CancelKind() => ct.IsCancellationRequested ? "cancelled" : "time-limit";
+
+        // Waits for the answer to the last request: cmd 510/511, subCmd 1. Gives up after ResponseTimeoutSeconds.
+        async Task<(string? Problem, JsonElement Payload)> NextResponseAsync(ushort cmd)
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(runCts.Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(ProbePlan.ResponseTimeoutSeconds));
+            try
+            {
+                while (true)
+                {
+                    Task<SocketEvent> read = responses.Reader.ReadAsync(timeout.Token).AsTask();
+                    Task first = await Task.WhenAny(read, anomaly.Task);
+                    if (first == anomaly.Task)
+                    {
+                        await timeout.CancelAsync();
+                        try
+                        {
+                            await read;
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // The pending read was canceled on purpose.
+                        }
+
+                        return (await anomaly.Task, default);
+                    }
+
+                    SocketEvent e = await read;
+                    if (e.Cmd == cmd && e.SubCmd == 1)
+                    {
+                        return (null, e.Payload);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                return (runCts.IsCancellationRequested ? CancelKind() : "no-response", default);
+            }
+        }
+
+        async Task<string> DriveAsync()
+        {
+            Task firstDone = await Task.WhenAny(
+                connected.Task,
+                anomaly.Task,
+                Task.Delay(TimeSpan.FromSeconds(ProbePlan.ResponseTimeoutSeconds), runCts.Token));
+            if (firstDone == anomaly.Task)
+            {
+                return await anomaly.Task;
+            }
+
+            if (firstDone != connected.Task)
+            {
+                return runCts.IsCancellationRequested ? CancelKind() : "no-connection";
+            }
+
+            Console.WriteLine($"Connected. Waiting {ProbePlan.SettleSecondsAfterConnect} seconds, then requesting old messages.");
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(ProbePlan.SettleSecondsAfterConnect), runCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return CancelKind();
+            }
+
+            Stopwatch? sinceLast = null;
+            foreach (HistoryScope scope in new[] { HistoryScope.Private, HistoryScope.Group })
+            {
+                ushort responseCmd = scope == HistoryScope.Private ? (ushort)510 : (ushort)511;
+                string scopeName = scope == HistoryScope.Private ? "private" : "group";
+                HistoryProbeSummary? previous = null;
+                int pagesDone = 0;
+                while (true)
+                {
+                    double sinceSeconds = sinceLast?.Elapsed.TotalSeconds ?? double.PositiveInfinity;
+                    if (!ProbePlan.ShouldRequestNext(
+                            pagesDone, previous?.Parsed ?? 0, previous?.HasError ?? false, sinceSeconds, total.Elapsed.TotalSeconds))
+                    {
+                        string reason = previous is { HasError: true } ? "error"
+                            : previous is { Parsed: 0 } ? "empty page"
+                            : pagesDone >= ProbePlan.MaxPagesPerScope ? "page limit"
+                            : "time limit";
+                        Console.WriteLine($"Scope {scopeName}: {pagesDone} page(s), stopped by: {reason}.");
+                        break;
+                    }
+
+                    string? lastId = null;
+                    if (previous is not null)
+                    {
+                        if (!previous.TryGetNextLastId(out string nextId))
+                        {
+                            return "next-id-not-usable";
+                        }
+
+                        lastId = nextId;
+                    }
+
+                    double wait = ProbePlan.SecondsToWait(sinceSeconds);
+                    if (wait > 0)
+                    {
+                        try
+                        {
+                            await Task.Delay(TimeSpan.FromSeconds(wait), runCts.Token);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            return CancelKind();
+                        }
+                    }
+
+                    Interlocked.Increment(ref requestsSent);
+                    client.RequestOldMessages(scope, lastId);
+                    sinceLast = Stopwatch.StartNew();
+
+                    (string? problem, JsonElement payload) = await NextResponseAsync(responseCmd);
+                    if (problem is not null)
+                    {
+                        return problem;
+                    }
+
+                    var summary = HistoryProbeSummary.From(payload, scope, session.Info.Uid, DateTimeOffset.UtcNow, previous);
+                    pagesDone++;
+                    parsedTotal += summary.Parsed;
+                    if (scope == HistoryScope.Private)
+                    {
+                        privatePages++;
+                    }
+                    else
+                    {
+                        groupPages++;
+                    }
+
+                    Console.WriteLine($"[{scopeName} page {pagesDone}] {summary.Format()}");
+                    Console.WriteLine("  shape: " + System.Text.RegularExpressions.Regex.Replace(summary.Shape, @"\s+", " ").Trim());
+                    if (summary.HasError)
+                    {
+                        return "error-indicator";
+                    }
+
+                    previous = summary;
+                }
+            }
+
+            return "complete";
+        }
+    }
+    catch (ApiException ex)
+    {
+        stop = "api-error";
+        Console.WriteLine($"The server returned error {ex.ErrorCode}");
+    }
+    catch (RateLimitedException)
+    {
+        stop = "rate-limited";
+        guard.RecordBlock();
+        Console.WriteLine("429, stopping. Wait at least one hour before running again, do NOT run again right away.");
+    }
+    catch (HttpRequestException ex)
+    {
+        stop = "http-error";
+        Console.WriteLine(ex.StatusCode is { } status ? $"HTTP error {(int)status}" : $"Network error ({ex.GetType().Name})");
+    }
+    catch (InvalidDataException ex)
+    {
+        stop = "malformed-response";
+        Console.WriteLine($"Malformed response ({ex.GetType().Name})");
+    }
+    catch (OperationCanceledException)
+    {
+        stop = "cancelled";
+        Console.WriteLine("Cancelled.");
+    }
+
+    if (stop is "error-indicator" or "disconnect-after-request")
+    {
+        guard.RecordBlock(); // The cooldown protects the account: do not run again for an hour.
+        Console.WriteLine("Anomaly: " + stop + ". Wait at least one hour before running again.");
+    }
+    else if (stop is not ("complete" or "time-limit" or "cancelled"))
+    {
+        Console.WriteLine("Anomaly: " + stop);
+    }
+
+    Console.WriteLine(
+        $"Summary: stop={stop} requests={requestsSent} private_pages={privatePages} group_pages={groupPages} "
+        + $"parsed={parsedTotal} seconds={(int)total.Elapsed.TotalSeconds}");
 }
 
 static void PrintSeedUsage()

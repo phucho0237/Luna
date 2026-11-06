@@ -135,6 +135,7 @@ Folder `Luna.Protocol/Api/`.
 
 ### [ ] T5b. Pull history from the server
 
+- Status: probe coded (branch `t5b-history-probe`), waiting for the human run of `Luna.Playground -- --history-probe` with the secondary account. Nothing has been tried on the live server; the real pull is not started.
 - Pull history over WebSocket (frames 510/511) or HTTP (`/api/group/history`); choose one and record the reason in `PROTOCOL.md`.
 - Needs live shape runs with the secondary account first (run by Luca with `Luna.Playground`); the agent must not claim to have tried the live server.
 - Feed the result into `IMessageStore.SaveAsync`; respect the per-endpoint intervals and the 429 cooldown from T3d and T3e.
