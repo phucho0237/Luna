@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Luna.Core.Auth;
+using Luna.Core.Dev;
 using Luna.Core.Sessions;
+using Luna.Core.Storage;
 using Luna.Core.Throttling;
 using Luna.Protocol;
 using Luna.Protocol.Api;
@@ -10,6 +12,15 @@ using Luna.Protocol.Diagnostics;
 using Luna.Protocol.Events;
 using Luna.Protocol.Messaging;
 using Luna.Protocol.Realtime;
+
+// --seed-history mode: OFFLINE. Writes FAKE messages into a local file; no server, no session, no API call. Handled first,
+// before anything that could touch the saved session is built.
+int seedIndex = Array.FindIndex(args, a => string.Equals(a, "--seed-history", StringComparison.OrdinalIgnoreCase));
+if (seedIndex >= 0)
+{
+    await SeedHistoryAsync(args, seedIndex);
+    return;
+}
 
 bool printShape = args.Contains("--shape", StringComparer.OrdinalIgnoreCase)
     || args.Contains("--inspect-shape", StringComparer.OrdinalIgnoreCase)
@@ -374,6 +385,92 @@ finally
     if (File.Exists(qrPath))
     {
         File.Delete(qrPath);
+    }
+}
+
+static void PrintSeedUsage()
+{
+    Console.WriteLine("Usage: --seed-history <file> <count> [--force]");
+    Console.WriteLine("  OFFLINE: no server, no session, no API call. Writes <count> (1 to 1000000) FAKE messages and fake contact");
+    Console.WriteLine("  names into a SQLite file.");
+    Console.WriteLine("  The file must be outside %LOCALAPPDATA%\\Luna (the real history is never touched). An existing file is used");
+    Console.WriteLine("  only with --force, and only when it holds nothing but fake conversations.");
+    Console.WriteLine("  The file is for Debug runs of the app: set LUNA_HISTORY_DB to its path before starting the app.");
+    Console.WriteLine("  WARNING: when the app runs on this file it ALSO saves real incoming messages and real friend names into");
+    Console.WriteLine("  it. Delete the file afterwards.");
+}
+
+// Prints only counts and short reasons: never a message text, a name, an id or the file path.
+static async Task SeedHistoryAsync(string[] args, int seedIndex)
+{
+    const int MaxSeedCount = 1_000_000;
+    const int BatchSize = 500;
+
+    bool force = args.Contains("--force", StringComparer.OrdinalIgnoreCase);
+    string? file = seedIndex + 1 < args.Length ? args[seedIndex + 1] : null;
+    string? countText = seedIndex + 2 < args.Length ? args[seedIndex + 2] : null;
+    if (file is null
+        || file.StartsWith("--", StringComparison.Ordinal)
+        || countText is null
+        || !int.TryParse(countText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int count)
+        || count < 1
+        || count > MaxSeedCount)
+    {
+        PrintSeedUsage();
+        return;
+    }
+
+    SeedTargetCheck check = SyntheticHistory.CheckTarget(file, MessageStoreDefaults.DefaultPath, force, File.Exists);
+    if (check != SeedTargetCheck.Ok)
+    {
+        Console.WriteLine(check switch
+        {
+            SeedTargetCheck.IsDefaultPath => "Refused: that is the real history database.",
+            SeedTargetCheck.InsideDataFolder => "Refused: the path is inside the folder of the real history database.",
+            SeedTargetCheck.ExistsWithoutForce => "Refused: the file already exists. Use --force to add to it.",
+            _ => "Refused: not a usable file path.",
+        });
+        return;
+    }
+
+    string fullPath = Path.GetFullPath(file);
+    try
+    {
+        using var seedStore = new SqliteMessageStore(fullPath);
+
+        // An existing file (only possible with --force) must hold nothing but fake conversations before anything is saved.
+        IReadOnlyList<ConversationSummary> existing = await seedStore.ListConversationsAsync(500);
+        if (!SyntheticHistory.AreAllThreadsSynthetic(existing.Select(c => c.ThreadId)))
+        {
+            Console.WriteLine("Refused: the existing file holds conversations that are not fake. Nothing was written.");
+            return;
+        }
+
+        IReadOnlyList<ChatMessage> history = SyntheticHistory.Build(count, DateTimeOffset.UtcNow);
+        int inserted = 0;
+        int recalled = 0;
+        int skipped = 0;
+        for (int offset = 0; offset < history.Count; offset += BatchSize)
+        {
+            StoreResult result = await seedStore.SaveAsync(history.Skip(offset).Take(BatchSize).ToList());
+            inserted += result.Inserted;
+            recalled += result.Recalled;
+            skipped += result.Skipped;
+        }
+
+        await seedStore.ReplaceContactsAsync(SyntheticHistory.ContactNames);
+        IReadOnlyList<ConversationSummary> conversations = await seedStore.ListConversationsAsync(500);
+
+        Console.WriteLine($"Messages saved: {inserted}");
+        Console.WriteLine($"Recall notices applied: {recalled}");
+        Console.WriteLine($"Skipped: {skipped}");
+        Console.WriteLine($"Conversations: {conversations.Count}");
+        Console.WriteLine("Reminder: the app saves real messages and friend names into this file too. Delete it afterwards.");
+    }
+    catch (Exception ex)
+    {
+        // Only the exception type is printed: a message can carry a path or data.
+        Console.WriteLine($"Failed ({ex.GetType().Name}). The file may be incomplete; delete it and try again.");
     }
 }
 

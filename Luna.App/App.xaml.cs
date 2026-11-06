@@ -80,9 +80,19 @@ namespace Luna.App
         // too new can cause are handled; the exception is logged by type only (CrashLog never writes the message).
         private static SqliteMessageStore? OpenMessageStore()
         {
+            string path = MessageStoreDefaults.DefaultPath;
+#if DEBUG
+            // Debug builds only: LUNA_HISTORY_DB points the app at another database file, for example a synthetic history made
+            // by "Luna.Playground --seed-history". The app still saves real incoming messages and friend names into that file.
+            string? overridePath = Environment.GetEnvironmentVariable("LUNA_HISTORY_DB");
+            if (!string.IsNullOrWhiteSpace(overridePath))
+            {
+                path = overridePath;
+            }
+#endif
             try
             {
-                return new SqliteMessageStore(MessageStoreDefaults.DefaultPath);
+                return new SqliteMessageStore(path);
             }
             catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException or InvalidDataException)
             {
