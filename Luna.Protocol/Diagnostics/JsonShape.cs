@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -15,6 +16,11 @@ public static class JsonShape
 
     private const string ValuePlaceholder = "<v>";
 
+    private const int MaxStrictKeys = 30;
+
+    private static readonly Regex StrictName = new(
+        @"^[A-Za-z][A-Za-z0-9_]{0,23}\z", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     private static readonly Regex AllowedToken = new(
         @"^[a-z][a-z0-9_.-]{0,39}\z", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex AllowedName = new(
@@ -30,7 +36,19 @@ public static class JsonShape
     public static string Describe(JsonElement element, int maxDepth = 6)
     {
         var sb = new StringBuilder();
-        Write(sb, element, 0, maxDepth);
+        Write(sb, element, 0, maxDepth, strict: false);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Like <see cref="Describe(JsonElement, int)"/>. With <paramref name="strict"/> set, field names go through
+    /// <see cref="SafeNameStrict"/> and an object with more than 30 keys prints only <c>object(N keys)</c>, because such
+    /// an object is most likely a map keyed by data. Used for output built from live history data.
+    /// </summary>
+    public static string Describe(JsonElement element, int maxDepth, bool strict)
+    {
+        var sb = new StringBuilder();
+        Write(sb, element, 0, maxDepth, strict);
         return sb.ToString();
     }
 
@@ -91,7 +109,7 @@ public static class JsonShape
         return flat.Length > maxLength ? flat[..maxLength] + "..." : flat;
     }
 
-    private static void Write(StringBuilder sb, JsonElement element, int level, int maxDepth)
+    private static void Write(StringBuilder sb, JsonElement element, int level, int maxDepth, bool strict)
     {
         switch (element.ValueKind)
         {
@@ -102,14 +120,25 @@ public static class JsonShape
                     return;
                 }
 
+                if (strict)
+                {
+                    int keys = element.EnumerateObject().Count();
+                    if (keys > MaxStrictKeys)
+                    {
+                        sb.Append("object(").Append(keys.ToString(CultureInfo.InvariantCulture)).Append(" keys)");
+                        return;
+                    }
+                }
+
                 // Sibling keys with the same name (after replacing <id>) and the same shape are merged into one line.
                 var lines = new List<string>();
                 var seen = new HashSet<string>(StringComparer.Ordinal);
                 foreach (JsonProperty prop in element.EnumerateObject())
                 {
                     var child = new StringBuilder();
-                    Write(child, prop.Value, level + 1, maxDepth);
-                    string line = $"{Indent(level + 1)}{SafeName(prop.Name)}: {child}";
+                    Write(child, prop.Value, level + 1, maxDepth, strict);
+                    string name = strict ? SafeNameStrict(prop.Name) : SafeName(prop.Name);
+                    string line = $"{Indent(level + 1)}{name}: {child}";
                     if (seen.Add(line))
                     {
                         lines.Add(line);
@@ -139,7 +168,7 @@ public static class JsonShape
                 }
 
                 sb.Append('[');
-                Write(sb, element.EnumerateArray().First(), level, maxDepth);
+                Write(sb, element.EnumerateArray().First(), level, maxDepth, strict);
                 sb.Append(']');
                 return;
 
@@ -171,6 +200,35 @@ public static class JsonShape
     /// </summary>
     public static string SafeName(string name) =>
         AllowedName.IsMatch(name) && !FiveDigits.IsMatch(name) && !HexKey.IsMatch(name) ? name : KeyPlaceholder;
+
+    /// <summary>
+    /// The stricter form of <see cref="SafeName"/>, for names taken from live message data: returns the name only when
+    /// it starts with an ASCII letter, has only ASCII letters, digits and underscore, is at most 24 characters and has at
+    /// most one digit (this masks ids, uids and timestamps used as keys). Otherwise returns <c>&lt;key&gt;</c>.
+    /// A short plain word still passes, so this narrows what can be printed; it cannot tell a field name from a word.
+    /// </summary>
+    public static string SafeNameStrict(string name)
+    {
+        if (name is null || !StrictName.IsMatch(name))
+        {
+            return KeyPlaceholder;
+        }
+
+        int digits = 0;
+        foreach (char c in name)
+        {
+            if (c is >= '0' and <= '9')
+            {
+                digits++;
+            }
+        }
+
+        return digits > 1 ? KeyPlaceholder : name;
+    }
+
+    /// <summary>True when an object has more keys than the strict mode prints by name (more than 30).</summary>
+    internal static bool HasTooManyKeysForStrict(JsonElement element) =>
+        element.ValueKind == JsonValueKind.Object && element.EnumerateObject().Count() > MaxStrictKeys;
 
     /// <summary>
     /// Returns a category value (for example <c>act_type</c>, <c>act</c>) if it is safe to print: starts with a lowercase letter,

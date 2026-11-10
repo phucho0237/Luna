@@ -238,4 +238,59 @@ public class JsonShapeTests
         Assert.Equal(key, JsonShape.SafeName(key));
         Assert.Contains(key + ":", Shape("{\"" + key + "\":1}"));
     }
+
+    [Theory]
+    [InlineData("msgId", true)]
+    [InlineData("name_of_a_person", true)]
+    [InlineData("error_code", true)]
+    [InlineData("page2", true)]
+    [InlineData("Abcdefghijklmnopqrstuvwx", true)]
+    [InlineData("Abcdefghijklmnopqrstuvwxy", false)]
+    [InlineData("uid7000001", false)]
+    [InlineData("a1b2c3", false)]
+    [InlineData("v12", false)]
+    [InlineData("_name", false)]
+    [InlineData("7days", false)]
+    [InlineData("first name", false)]
+    [InlineData("first-name", false)]
+    [InlineData("chat.photo", false)]
+    [InlineData("tên", false)]
+    [InlineData("", false)]
+    public void SafeNameStrict_keeps_only_short_names_with_at_most_one_digit(string name, bool kept)
+    {
+        Assert.Equal(kept ? name : "<key>", JsonShape.SafeNameStrict(name));
+    }
+
+    [Fact]
+    public void Strict_describe_masks_names_that_the_default_mode_keeps()
+    {
+        JsonElement element = Parse("""{"a1b2c3":1,"msgId":"x","inner":{"k9x8":true}}""");
+
+        string strict = JsonShape.Describe(element, 6, strict: true);
+        string normal = JsonShape.Describe(element, 6, strict: false);
+
+        Assert.Contains("<key>: number", strict);
+        Assert.Contains("msgId: string", strict);
+        Assert.Contains("<key>: boolean", strict);
+        Assert.DoesNotContain("a1b2c3", strict);
+        Assert.DoesNotContain("k9x8", strict);
+        Assert.Contains("a1b2c3: number", normal);
+        Assert.Equal(JsonShape.Describe(element), normal);
+    }
+
+    [Theory]
+    [InlineData(30, false)]
+    [InlineData(31, true)]
+    [InlineData(40, true)]
+    public void Strict_describe_prints_only_the_key_count_of_an_object_with_more_than_thirty_keys(int count, bool collapsed)
+    {
+        string map = string.Join(",", Enumerable.Range(0, count).Select(i => $"\"fakeword{(char)('a' + i % 26)}{(char)('a' + i / 26)}\":1"));
+        JsonElement element = Parse("{\"wrap\":{" + map + "}}");
+
+        string strict = JsonShape.Describe(element, 6, strict: true);
+
+        Assert.Equal(collapsed, strict.Contains($"wrap: object({count} keys)", StringComparison.Ordinal));
+        Assert.Equal(!collapsed, strict.Contains("fakeword", StringComparison.Ordinal));
+        Assert.Contains("fakeword", JsonShape.Describe(element, 6), StringComparison.Ordinal);
+    }
 }

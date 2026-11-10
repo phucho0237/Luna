@@ -230,7 +230,7 @@ public class HistoryProbeSummaryTests
     }
 
     [Fact]
-    public void Kinds_are_counted_through_SafeName_with_dots_turned_into_underscores_and_capped()
+    public void Kinds_are_counted_against_the_allow_list_with_dots_turned_into_underscores()
     {
         HistoryProbeSummary summary = Private(PrivatePage(
             Msg(Other1, Self, "101", DaysAgoMs(1), "webchat"),
@@ -241,15 +241,115 @@ public class HistoryProbeSummaryTests
 
         Assert.Equal(1, summary.KindCounts["webchat"]);
         Assert.Equal(2, summary.KindCounts["chat_photo"]);
-        Assert.Equal(2, summary.KindCounts["<key>"]);
+        Assert.Equal(2, summary.KindCounts["other"]);
+        Assert.Equal(3, summary.KindCounts.Count);
 
         string[] many = Enumerable.Range(0, 20)
             .Select(i => Msg(Other1, Self, (200 + i).ToString(System.Globalization.CultureInfo.InvariantCulture), DaysAgoMs(1), "kind" + (char)('a' + i)))
             .ToArray();
-        HistoryProbeSummary capped = Private(PrivatePage(many));
+        HistoryProbeSummary unknown = Private(PrivatePage(many));
 
-        Assert.True(capped.KindCounts.Count <= 13);
-        Assert.Equal(20, capped.KindCounts.Values.Sum());
+        Assert.Equal(20, Assert.Single(unknown.KindCounts).Value);
+        Assert.Equal("other", Assert.Single(unknown.KindCounts).Key);
+    }
+
+    private const string FakeLongWord = "Abcdefghijklmnopqrstuvwxyzabcd";
+
+    private static string Printed(HistoryProbeSummary summary) =>
+        new StringBuilder()
+            .Append(summary).Append('\n')
+            .Append(summary.Format()).Append('\n')
+            .Append(summary.Shape).Append('\n')
+            .Append(string.Join(',', summary.ExtraFieldNames)).Append('\n')
+            .Append(string.Join(',', summary.KindCounts.Select(p => p.Key + p.Value)))
+            .ToString();
+
+    [Fact]
+    public void A_kind_that_is_not_a_known_message_type_is_counted_as_other_and_never_printed()
+    {
+        Assert.Equal(30, FakeLongWord.Length);
+        HistoryProbeSummary summary = Private(PrivatePage(
+            Msg(Other1, Self, "401", DaysAgoMs(1), "alice"),
+            Msg(Other1, Self, "402", DaysAgoMs(1), "Nguyen"),
+            Msg(Other1, Self, "403", DaysAgoMs(1), "webchat"),
+            Msg(Other1, Self, "404", DaysAgoMs(1), "chat.photo"),
+            Msg(Other1, Self, "405", DaysAgoMs(1), FakeLongWord),
+            Msg(Other1, Self, "406", DaysAgoMs(1), string.Empty)));
+
+        Assert.Equal(6, summary.Parsed);
+        Assert.Equal(1, summary.KindCounts["webchat"]);
+        Assert.Equal(1, summary.KindCounts["chat_photo"]);
+        Assert.Equal(4, summary.KindCounts["other"]);
+        Assert.Equal(3, summary.KindCounts.Count);
+        Assert.Contains("kinds=other:4,chat_photo:1,webchat:1 ", summary.Format(), StringComparison.Ordinal);
+
+        string printed = Printed(summary);
+        foreach (string fake in new[] { "alice", "Nguyen", FakeLongWord, "<key>" })
+        {
+            Assert.DoesNotContain(fake, printed, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void Every_MessageTypes_constant_is_an_allowed_kind()
+    {
+        string[] constants = typeof(Luna.Protocol.Messaging.MessageTypes)
+            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(f => f.IsLiteral && f.FieldType == typeof(string))
+            .Select(f => (string)f.GetRawConstantValue()!)
+            .ToArray();
+
+        Assert.True(constants.Length >= 5, "MessageTypes should have at least the five known constants.");
+        foreach (string constant in constants)
+        {
+            HistoryProbeSummary summary = Private(PrivatePage(Msg(Other1, Self, "411", DaysAgoMs(1), constant)));
+
+            Assert.Equal(constant.Replace('.', '_'), Assert.Single(summary.KindCounts).Key);
+        }
+    }
+
+    [Fact]
+    public void Field_names_that_look_like_data_are_masked_in_the_shape_and_in_the_extra_names()
+    {
+        const string LongName = "Abcdefghijklmnopqrstuvwxy";
+        Assert.Equal(25, LongName.Length);
+        JsonElement payload = Page(
+            "msgs",
+            [Msg(Other1, Self, "421", DaysAgoMs(1))],
+            ",\"uid7000001\":1,\"msgId\":2,\"a1b2c3\":true,\"name_of_a_person\":3,\"" + LongName + "\":4,\"page2\":5");
+
+        HistoryProbeSummary summary = Private(payload);
+
+        Assert.Equal(["<key>", "error_code", "msgId", "name_of_a_person", "page2"], summary.ExtraFieldNames.ToArray());
+        Assert.Contains("msgId: number", summary.Shape, StringComparison.Ordinal);
+        Assert.Contains("name_of_a_person: number", summary.Shape, StringComparison.Ordinal);
+        Assert.Contains("page2: number", summary.Shape, StringComparison.Ordinal);
+        Assert.Contains("<key>: number", summary.Shape, StringComparison.Ordinal);
+
+        string printed = Printed(summary);
+        foreach (string fake in new[] { "uid7000001", "7000001", "a1b2c3", LongName })
+        {
+            Assert.DoesNotContain(fake, printed, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void An_object_with_more_than_thirty_keys_prints_only_the_number_of_keys()
+    {
+        string[] fakeKeys = Enumerable.Range(0, 40).Select(i => "fakeword" + (char)('a' + (i % 26)) + (char)('a' + (i / 26))).ToArray();
+        string map = string.Join(",", fakeKeys.Select(k => "\"" + k + "\":1"));
+        JsonElement asData = Json("{\"error_code\":0,\"data\":{" + map + "}}");
+        JsonElement nested = Json(
+            "{\"error_code\":0,\"data\":{\"msgs\":[" + Msg(Other1, Self, "431", DaysAgoMs(1)) + "],\"byUser\":{" + map + "}}}");
+
+        HistoryProbeSummary dataSummary = Private(asData);
+        HistoryProbeSummary nestedSummary = Private(nested);
+
+        Assert.Contains("data: object(40 keys)", dataSummary.Shape, StringComparison.Ordinal);
+        Assert.Equal(["error_code"], dataSummary.ExtraFieldNames.ToArray());
+        Assert.Equal(1, nestedSummary.Parsed);
+        string printed = Printed(dataSummary) + Printed(nestedSummary);
+        Assert.DoesNotContain("fakeword", printed, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

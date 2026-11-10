@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Reflection;
 using System.Text.Json;
 using Luna.Protocol.Messaging;
 using Luna.Protocol.Realtime;
@@ -14,8 +15,16 @@ namespace Luna.Protocol.Diagnostics;
 /// </summary>
 public sealed class HistoryProbeSummary
 {
-    private const int MaxKinds = 12;
-    private const string OtherKinds = "<other>";
+    private const string OtherKinds = "other";
+
+    // The only kinds ever printed: the msgType constants of MessageTypes, dots turned into underscores. Built from the
+    // constants themselves so that a new constant is picked up without touching this file.
+    private static readonly HashSet<string> AllowedKinds = typeof(MessageTypes)
+        .GetFields(BindingFlags.Public | BindingFlags.Static)
+        .Where(field => field.IsLiteral && field.FieldType == typeof(string))
+        .Select(field => ((string)field.GetRawConstantValue()!).Replace('.', '_'))
+        .ToHashSet(StringComparer.Ordinal);
+
     private const long MillisecondsThreshold = 100_000_000_000L;
     private const long DayMilliseconds = 86_400_000L;
 
@@ -49,13 +58,20 @@ public sealed class HistoryProbeSummary
     /// <summary>Whole days before now of the newest message with a usable timestamp (future counts as 0), or null.</summary>
     public int? NewestDaysAgo { get; private set; }
 
-    /// <summary>Messages per <c>msgType</c> (dots turned into underscores, then <see cref="JsonShape.SafeName"/>), capped.</summary>
+    /// <summary>
+    /// Messages per <c>msgType</c>. A kind is named only when it equals one of the <see cref="MessageTypes"/> constants
+    /// (dots turned into underscores); every other value, including an empty one, is counted under <c>other</c>, so no
+    /// free text from the server reaches the output.
+    /// </summary>
     public IReadOnlyDictionary<string, int> KindCounts { get; private set; } = new Dictionary<string, int>();
 
-    /// <summary>Names (through <see cref="JsonShape.SafeName"/>) of numeric or boolean top-level fields, sorted.</summary>
+    /// <summary>
+    /// Names (through <see cref="JsonShape.SafeNameStrict"/>) of numeric or boolean top-level fields, sorted. An object
+    /// with more than 30 keys contributes no names.
+    /// </summary>
     public IReadOnlyList<string> ExtraFieldNames { get; private set; } = [];
 
-    /// <summary>Names and types of the payload to depth 2 (<see cref="JsonShape.Describe"/>). Multi-line; not part of <see cref="Format"/>.</summary>
+    /// <summary>Names and types of the payload to depth 2 (strict <see cref="JsonShape.Describe(JsonElement, int, bool)"/>). Multi-line; not part of <see cref="Format"/>.</summary>
     public string Shape { get; private set; } = string.Empty;
 
     /// <summary>The numeric <c>error_code</c> of the payload (or of its data), null if there is none. A present but unreadable one is <see cref="int.MaxValue"/>.</summary>
@@ -91,7 +107,7 @@ public sealed class HistoryProbeSummary
         {
             Parsed = parsed.Messages.Count,
             Skipped = parsed.Skipped,
-            Shape = JsonShape.Describe(payload, 2),
+            Shape = JsonShape.Describe(payload, 2, strict: true),
             ErrorCode = ReadErrorCode(payload),
             ExtraFieldNames = ReadExtraFieldNames(payload),
         };
@@ -122,7 +138,8 @@ public sealed class HistoryProbeSummary
                 summary._messageIds.Add(message.MsgId);
             }
 
-            string kind = JsonShape.SafeName(message.MsgType.Replace('.', '_'));
+            string candidate = message.MsgType.Replace('.', '_');
+            string kind = AllowedKinds.Contains(candidate) ? candidate : OtherKinds;
             kinds[kind] = kinds.GetValueOrDefault(kind) + 1;
 
             if (!TryNormalizeMilliseconds(message.Timestamp, out long milliseconds))
@@ -142,7 +159,7 @@ public sealed class HistoryProbeSummary
 
         summary.ThreadCount = threads.Count;
         summary._nextLastId = oldestId;
-        summary.KindCounts = CapKinds(kinds);
+        summary.KindCounts = kinds;
         summary.OldestDaysAgo = summary._oldestMilliseconds is { } o ? DaysBefore(o, nowMilliseconds) : null;
         summary.NewestDaysAgo = summary._newestMilliseconds is { } n ? DaysBefore(n, nowMilliseconds) : null;
 
@@ -198,19 +215,6 @@ public sealed class HistoryProbeSummary
     public override string ToString() => Format();
 
     private static string Days(int? value) => value is { } v ? v.ToString(CultureInfo.InvariantCulture) : "na";
-
-    private static IReadOnlyDictionary<string, int> CapKinds(Dictionary<string, int> kinds)
-    {
-        if (kinds.Count <= MaxKinds)
-        {
-            return kinds;
-        }
-
-        var ordered = kinds.OrderByDescending(p => p.Value).ThenBy(p => p.Key, StringComparer.Ordinal).ToList();
-        var capped = ordered.Take(MaxKinds).ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
-        capped[OtherKinds] = ordered.Skip(MaxKinds).Sum(p => p.Value);
-        return capped;
-    }
 
     /// <summary>A timestamp under 1e11 is in seconds, otherwise in milliseconds. Zero, negative or unreadable ones are unusable.</summary>
     private static bool TryNormalizeMilliseconds(string text, out long milliseconds)
@@ -304,7 +308,8 @@ public sealed class HistoryProbeSummary
 
     private static void AddScalarNames(JsonElement container, HashSet<string> names)
     {
-        if (container.ValueKind != JsonValueKind.Object)
+        // An object with that many keys is most likely a map keyed by data: none of its names are reported.
+        if (container.ValueKind != JsonValueKind.Object || JsonShape.HasTooManyKeysForStrict(container))
         {
             return;
         }
@@ -313,7 +318,7 @@ public sealed class HistoryProbeSummary
         {
             if (property.Value.ValueKind is JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False)
             {
-                names.Add(JsonShape.SafeName(property.Name));
+                names.Add(JsonShape.SafeNameStrict(property.Name));
             }
         }
     }
